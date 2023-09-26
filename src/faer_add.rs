@@ -31,3 +31,20 @@ pub fn write_mat_to_buffer(
 
     Ok(())
 }
+
+pub fn broadcast_inplace(f: impl Fn(Float) -> Float, m: &mut Mat<Float>) {
+    m.as_mut().cwise().for_each(|mut c| c.write(f(c.read())));
+}
+
+pub fn broadcast_to(f: impl Fn(Float) -> Float, m: &Mat<Float>, out: &mut Mat<Float>) {
+    out.as_mut()
+        .cwise()
+        .zip(m.as_ref())
+        .for_each(|mut out_c, m_c| out_c.write(f(m_c.read())));
+}
+
+pub fn broadcast(f: impl Fn(Float) -> Float, m: &Mat<Float>) -> Mat<Float> {
+    let mut out = m.clone();
+    broadcast_to(f, m, &mut out);
+    out
+}

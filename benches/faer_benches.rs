@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use conlaw::faer_add::apply_func;
+use conlaw::faer_add::{apply_func, broadcast};
 use conlaw::Float;
 use faer::Mat;
 
@@ -29,9 +29,21 @@ fn benchmark_apply_func(c: &mut Criterion) {
     });
 }
 
+fn benchmark_broadcast(c: &mut Criterion) {
+    c.bench_function("broadcast", |b| {
+        b.iter(|| {
+            broadcast(
+                burger_flux_function,
+                U.get_or_init(|| Mat::from_fn(40, 1, |i, _| 40.0 * i as Float)),
+            )
+        })
+    });
+}
+
 criterion_group!(
     benches,
     benchmark_burger_flux_function,
-    benchmark_apply_func
+    benchmark_apply_func,
+    benchmark_broadcast
 );
 criterion_main!(benches);
