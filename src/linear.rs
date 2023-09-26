@@ -2,9 +2,6 @@ use crate::Float;
 use faer::Mat;
 use std::sync::OnceLock;
 
-static P: OnceLock<Mat<Float>> = OnceLock::new();
-static Q: OnceLock<Mat<Float>> = OnceLock::new();
-
 // generic two-level linear numerical method matrix builder with periodic boundary conditions
 // where ql, qc, qr are
 // ql == [q_{-1}, q_{-2}, ..., q_{-l}]
@@ -47,6 +44,7 @@ pub(crate) fn linear_periodic_scheme(
         }
     });
 
+    static P: OnceLock<Mat<Float>> = OnceLock::new();
     let p = P.get_or_init(|| {
         Mat::<Float>::from_fn(size + 1, size, |i, j| {
             if i == j || (i, j) == (size, 0) {
@@ -57,6 +55,7 @@ pub(crate) fn linear_periodic_scheme(
         })
     });
 
+    static Q: OnceLock<Mat<Float>> = OnceLock::new();
     let q = Q.get_or_init(|| {
         Mat::<Float>::from_fn(size, size + 1, |i, j| if i == j { 1.0 } else { 0.0 })
     });
