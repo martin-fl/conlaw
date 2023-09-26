@@ -6,9 +6,13 @@ static P: OnceLock<Mat<Float>> = OnceLock::new();
 static Q: OnceLock<Mat<Float>> = OnceLock::new();
 
 // generic two-level linear numerical method matrix builder with periodic boundary conditions
+// where ql, qc, qr are
 // ql == [q_{-1}, q_{-2}, ..., q_{-l}]
 // qc == q_0
 // qr == [q_1, q_2, ..., q_r]
+// in
+// U^{n+1}_j = \sum_{m=-l}^{r} q_m U^n_{j+m}
+// U^n_j = U^n_{j+N} for all j
 pub(crate) fn linear_periodic_scheme(
     size: usize,
     ql: &[Float],
@@ -72,6 +76,7 @@ pub enum Schema {
 
 pub use Schema::*;
 
+#[derive(Clone, Debug)]
 pub struct Driver {
     schema: Schema,
     b: Mat<Float>,
