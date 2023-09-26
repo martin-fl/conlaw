@@ -67,8 +67,8 @@ pub(crate) fn linear_periodic_scheme(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Schema {
     BackwardEuler,
-    OneSidedLeft,
-    OneSidedRight,
+    UpwindLeft,
+    UpwindRight,
     LaxFriedrichs,
     LaxWendroff,
     LaxWarming,
@@ -88,8 +88,8 @@ impl Driver {
 
         let b = match schema {
             BackwardEuler => linear_periodic_scheme(x_size, &[0.5 * p], 1.0, &[-0.5 * p]),
-            OneSidedLeft => linear_periodic_scheme(x_size, &[p], 1.0 - p, &[]),
-            OneSidedRight => linear_periodic_scheme(x_size, &[], 1.0 + p, &[-p]),
+            UpwindLeft => linear_periodic_scheme(x_size, &[p], 1.0 - p, &[]),
+            UpwindRight => linear_periodic_scheme(x_size, &[], 1.0 + p, &[-p]),
             LaxFriedrichs => {
                 linear_periodic_scheme(x_size, &[0.5 + 0.5 * p], 0.0, &[0.5 - 0.5 * p])
             }
@@ -117,8 +117,8 @@ impl Driver {
     pub fn name(&self) -> &'static str {
         match self.schema {
             BackwardEuler => "Backward-Euler",
-            OneSidedLeft => "One-Sided (Left)",
-            OneSidedRight => "One-Sided (Right)",
+            UpwindLeft => "Upwind (Left)",
+            UpwindRight => "Upwind (Right)",
             LaxFriedrichs => "Lax-Friedrichs",
             LaxWendroff => "Lax-Wendroff",
             LaxWarming => "Lax-Warming",
