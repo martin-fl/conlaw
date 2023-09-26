@@ -44,24 +44,16 @@ pub(crate) fn linear_periodic_scheme(
         }
     });
 
-    static P: OnceLock<Mat<Float>> = OnceLock::new();
-    let p = P.get_or_init(|| {
-        Mat::<Float>::from_fn(size + 1, size, |i, j| {
-            if i == j || (i, j) == (size, 0) {
-                1.0
-            } else {
-                0.0
-            }
-        })
+    let p = Mat::<Float>::from_fn(size + 1, size, |i, j| {
+        if i == j || (i, j) == (size, 0) {
+            1.0
+        } else {
+            0.0
+        }
     });
 
-    static Q: OnceLock<Mat<Float>> = OnceLock::new();
-    let q = Q.get_or_init(|| {
-        Mat::<Float>::from_fn(size, size + 1, |i, j| if i == j { 1.0 } else { 0.0 })
-    });
+    let q = Mat::<Float>::from_fn(size, size + 1, |i, j| if i == j { 1.0 } else { 0.0 });
 
-    // TODO: this will panick if this function is called multiple times
-    //       with different sizes, because of the statics
     p * hb * q
 }
 
