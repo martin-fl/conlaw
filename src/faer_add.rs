@@ -1,5 +1,6 @@
 use crate::Float;
 use faer::Mat;
+use faer_core::{MatMut, MatRef};
 use std::io::{self, Write};
 
 pub fn linspace(a: Float, size: usize, h: Float) -> Mat<Float> {
@@ -11,13 +12,13 @@ pub fn apply_func(m: &Mat<Float>, f: impl Fn(Float) -> Float) -> Mat<Float> {
 }
 
 pub fn write_mat_to_buffer(
-    m: &Mat<Float>,
+    m: MatRef<'_, Float>,
     output: &mut io::BufWriter<impl Write>,
 ) -> io::Result<()> {
     // SAFETY: faer stores matrix in column-major order with the guarantee that columns
     //         are stored contiguously. We're here taking the first `m.nrows()` elements,
     //         which is the length of 1 column.
-    let m_data = unsafe { std::slice::from_raw_parts(m.as_ptr(), m.nrows()) };
+    let m_data: &[Float] = unsafe { std::slice::from_raw_parts(m.as_ptr(), m.nrows()) };
 
     writeln!(
         output,
@@ -32,19 +33,16 @@ pub fn write_mat_to_buffer(
     Ok(())
 }
 
-pub fn broadcast_inplace(f: impl Fn(Float) -> Float, m: &mut Mat<Float>) {
-    m.as_mut().cwise().for_each(|mut c| c.write(f(c.read())));
+pub fn broadcast_inplace(f: impl Fn(Float) -> Float, m: MatMut<'_, Float>) {
+    faer_core::zipped!(m).for_each(|mut c| c.write(f(c.read())));
 }
 
-pub fn broadcast_to(f: impl Fn(Float) -> Float, m: &Mat<Float>, out: &mut Mat<Float>) {
-    out.as_mut()
-        .cwise()
-        .zip(m.as_ref())
-        .for_each(|mut out_c, m_c| out_c.write(f(m_c.read())));
+pub fn broadcast_to(f: impl Fn(Float) -> Float, m: MatRef<'_, Float>, out: MatMut<'_, Float>) {
+    faer_core::zipped!(out, m).for_each(|mut out, m| out.write(f(m.read())))
 }
 
-pub fn broadcast(f: impl Fn(Float) -> Float, m: &Mat<Float>) -> Mat<Float> {
-    let mut out = m.clone();
-    broadcast_to(f, m, &mut out);
+pub fn broadcast(f: impl Fn(Float) -> Float, m: MatRef<'_, Float>) -> Mat<Float> {
+    let mut out = m.to_owned();
+    broadcast_to(f, m, out.as_mut());
     out
 }

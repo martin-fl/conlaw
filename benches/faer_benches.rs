@@ -34,7 +34,8 @@ fn benchmark_broadcast(c: &mut Criterion) {
         b.iter(|| {
             broadcast(
                 burger_flux_function,
-                U.get_or_init(|| Mat::from_fn(40, 1, |i, _| 40.0 * i as Float)),
+                U.get_or_init(|| Mat::from_fn(40, 1, |i, _| 40.0 * i as Float))
+                    .as_ref(),
             )
         })
     });

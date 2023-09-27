@@ -167,6 +167,8 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "faer",
+ "faer-core",
+ "reborrow",
  "tracing",
  "tracing-subscriber",
 ]

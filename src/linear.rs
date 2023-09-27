@@ -1,6 +1,5 @@
-use crate::Float;
+use crate::{Domain, Driver, Float};
 use faer::Mat;
-use std::sync::OnceLock;
 
 // generic two-level linear numerical method matrix builder with periodic boundary conditions
 // where ql, qc, qr are
@@ -67,33 +66,44 @@ pub enum Schema {
     LaxWarming,
 }
 
+use faer_core::{MatMut, MatRef};
 pub use Schema::*;
 
 #[derive(Clone, Debug)]
-pub struct Driver {
+pub struct LinearDriver {
     schema: Schema,
     b: Mat<Float>,
 }
 
-impl Driver {
-    pub fn new(schema: Schema, t_step: Float, x_step: Float, x_size: usize, a: Float) -> Self {
-        let p = a * t_step / x_step;
+impl Driver for LinearDriver {
+    type Schema = Schema;
+
+    type Meta = Float;
+
+    fn init(schema: Schema, domain: &Domain, a: Float) -> Self {
+        let (t_step_size, x_step_size, x_steps) = (
+            domain.time().step_size(),
+            domain.space().step_size(),
+            domain.space().steps(),
+        );
+
+        let p = a * t_step_size / x_step_size;
 
         let b = match schema {
-            BackwardEuler => linear_periodic_scheme(x_size, &[0.5 * p], 1.0, &[-0.5 * p]),
-            UpwindLeft => linear_periodic_scheme(x_size, &[p], 1.0 - p, &[]),
-            UpwindRight => linear_periodic_scheme(x_size, &[], 1.0 + p, &[-p]),
+            BackwardEuler => linear_periodic_scheme(x_steps, &[0.5 * p], 1.0, &[-0.5 * p]),
+            UpwindLeft => linear_periodic_scheme(x_steps, &[p], 1.0 - p, &[]),
+            UpwindRight => linear_periodic_scheme(x_steps, &[], 1.0 + p, &[-p]),
             LaxFriedrichs => {
-                linear_periodic_scheme(x_size, &[0.5 + 0.5 * p], 0.0, &[0.5 - 0.5 * p])
+                linear_periodic_scheme(x_steps, &[0.5 + 0.5 * p], 0.0, &[0.5 - 0.5 * p])
             }
             LaxWendroff => linear_periodic_scheme(
-                x_size,
+                x_steps,
                 &[0.5 * p * (p + 1.0)],
                 1.0 - p * p,
                 &[0.5 * p * (p - 1.0)],
             ),
             LaxWarming => linear_periodic_scheme(
-                x_size,
+                x_steps,
                 &[p * (2.0 - p), 0.5 * p * (p - 1.0)],
                 1.0 - 1.5 * p + 0.5 * p * p,
                 &[],
@@ -102,12 +112,18 @@ impl Driver {
 
         Self { schema, b }
     }
-
-    pub fn next(&self, unj: &Mat<Float>) -> Mat<Float> {
-        &self.b * unj
+    fn next_to(&self, unj: MatRef<'_, Float>, out: MatMut<'_, Float>) {
+        faer_core::mul::matmul(
+            out,
+            self.b.as_ref(),
+            unj,
+            None,
+            1.0,
+            faer_core::Parallelism::None,
+        )
     }
 
-    pub fn name(&self) -> &'static str {
+    fn summary(&self) -> &'static str {
         match self.schema {
             BackwardEuler => "Backward-Euler",
             UpwindLeft => "Upwind (Left)",
