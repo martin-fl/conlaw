@@ -22,6 +22,7 @@ pub(crate) fn linear_periodic_matrix(
     let hb = Mat::from_fn(size, size, |i, j| {
         let m = j as isize - i as isize;
         let mm = m.unsigned_abs();
+        #[allow(clippy::collapsible_else_if, clippy::comparison_chain)]
         if m == 0 {
             qc
         } else if m > 0 {
@@ -71,7 +72,7 @@ macro_rules! linear_method {
                 let $p = a * t_step_size / x_step_size;
                 Self(linear_periodic_matrix(x_steps, $ql, $qc, $qr))
             }
-            fn next_to(&self, current: MatRef<'_, Float>, out: MatMut<'_, Float>) {
+            fn next_to(&mut self, current: MatRef<'_, Float>, out: MatMut<'_, Float>) {
                 faer_core::mul::matmul(
                     out,
                     self.0.as_ref(),

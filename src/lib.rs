@@ -1,6 +1,7 @@
 pub mod faer_add;
 
 pub mod linear;
+pub mod non_linear;
 
 pub type Float = f32;
 
@@ -15,9 +16,9 @@ pub trait Method {
 
     fn init(domain: &Domain, meta: Self::Meta) -> Self;
 
-    fn next_to(&self, current: MatRef<'_, Float>, out: MatMut<'_, Float>);
+    fn next_to(&mut self, current: MatRef<'_, Float>, out: MatMut<'_, Float>);
 
-    fn next(&self, current: MatRef<'_, Float>) -> Mat<Float> {
+    fn next(&mut self, current: MatRef<'_, Float>) -> Mat<Float> {
         let mut out = current.to_owned();
         self.next_to(current, out.as_mut());
         out
