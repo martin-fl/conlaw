@@ -7,7 +7,7 @@ pub type Float = f32;
 pub mod grid;
 use std::io::{self, Write};
 
-use faer_core::{Mat, MatMut, MatRef};
+use faer_core::{zipped, Mat, MatMut, MatRef};
 pub use grid::{DimensionKind, Domain, Grid};
 
 pub trait Method {
@@ -24,7 +24,7 @@ pub trait Method {
     }
 
     fn name(&self) -> &'static str {
-        "generic numerical method"
+        "Unspecified"
     }
 }
 
@@ -34,11 +34,11 @@ pub enum SolutionOutput<W = io::Sink> {
 }
 
 impl<W: Write> SolutionOutput<W> {
-    fn save<'a>(&'a mut self, u: MatRef<'a, Float>) -> io::Result<()> {
+    fn save<'a>(&'a mut self, u: MatRef<'a, Float>, i: usize) -> io::Result<()> {
         match self {
             SolutionOutput::Memory(m) => {
-                assert!(m.nrows() == u.nrows() && u.ncols() == 1);
-                m.resize_with(u.nrows(), m.ncols() + 1, |i, _| u.read(i, 1));
+                assert!(u.ncols() == 1);
+                zipped!(m.as_mut().col(i), u.as_ref()).for_each(|mut mi, ui| mi.write(ui.read()));
                 Ok(())
             }
             SolutionOutput::IO(output) => faer_add::write_mat_to_buffer(u, output),
@@ -52,7 +52,7 @@ pub struct Driver<M, W = io::Sink> {
     output: Option<SolutionOutput<W>>,
 }
 
-impl<M: Method> Driver<M> {
+impl<M: Method, W> Driver<M, W> {
     pub fn init(domain: Domain, meta: M::Meta) -> Self {
         Self {
             method: M::init(&domain, meta),
@@ -62,7 +62,7 @@ impl<M: Method> Driver<M> {
     }
 
     pub fn save_in_memory(mut self) -> Self {
-        self.output = Some(SolutionOutput::Memory(Mat::with_capacity(
+        self.output = Some(SolutionOutput::Memory(Mat::zeros(
             self.domain.space().steps() + 1,
             self.domain.time().steps() + 1,
         )));
@@ -77,6 +77,32 @@ impl<M: Method> Driver<M> {
             output: Some(SolutionOutput::IO(out)),
         }
     }
+
+    pub fn get_solution(&self) -> Option<MatRef<'_, Float>> {
+        match &self.output {
+            None | Some(SolutionOutput::IO(_)) => None,
+            Some(SolutionOutput::Memory(m)) => Some(m.as_ref()),
+        }
+    }
+}
+
+impl<M: Method, W> std::fmt::Display for Driver<M, W> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} method, Δt={} ({} steps), Δx={} ({} steps) ({})",
+            self.method.name(),
+            self.domain.time().step_size(),
+            self.domain.time().steps(),
+            self.domain.space().step_size(),
+            self.domain.space().steps(),
+            match &self.output {
+                Some(SolutionOutput::Memory(_)) => "saved in memory",
+                Some(SolutionOutput::IO(_)) => "saved to IO",
+                None => "not saved",
+            }
+        )
+    }
 }
 
 impl<M: Method, W: Write> Driver<M, W> {
@@ -84,10 +110,14 @@ impl<M: Method, W: Write> Driver<M, W> {
         let mut unj = u0j.to_owned();
         let mut temp = unj.clone();
 
-        for _ in 0..self.domain.time().steps() {
+        if let Some(so) = self.output.as_mut() {
+            so.save(unj.as_ref(), 0)?;
+        }
+
+        for n in 1..self.domain.time().steps() {
             self.method.next_to(unj.as_ref(), temp.as_mut());
             if let Some(so) = self.output.as_mut() {
-                so.save(temp.as_ref())?;
+                so.save(temp.as_ref(), n)?;
             }
             std::mem::swap(&mut unj, &mut temp);
         }

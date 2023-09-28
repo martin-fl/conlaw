@@ -1,6 +1,5 @@
 use std::io::{self, Write};
 use tracing::info;
-use tracing_subscriber;
 
 use conlaw::{faer_add::broadcast, linear, DimensionKind, Domain, Driver, Float, Grid};
 
@@ -10,7 +9,7 @@ fn main() -> io::Result<()> {
     info!("setting up problem data");
 
     // advection coefficient
-    let a = -1.0 as Float;
+    let a = 1.0 as Float;
     // initial condition
     // let u0 = |x: Float| 0.5 * (-100.0 * (x + 0.5).powi(2)).exp() + 0.25;
     let u0 = |x: Float| if -0.9 < x && x < -0.4 { 0.75 } else { 0.25 };
@@ -31,17 +30,12 @@ fn main() -> io::Result<()> {
     let output = std::fs::File::create("output.csv")?;
     let mut output = std::io::BufWriter::new(output);
 
-    info!("setting problem solver");
+    info!("building problem solver");
 
-    let mut solver = Driver::<linear::UpwindRight>::init(domain.clone(), a).save_to(&mut output);
+    let mut solver = Driver::<linear::LaxWarming>::init(domain.clone(), a).save_to(&mut output);
 
-    info!(
-        "solving problem (size = {} bytes ({} time steps, {} spatial steps), scheme = {})",
-        (domain.time().steps() + 1) * (domain.space().steps() + 1) * std::mem::size_of::<Float>(),
-        domain.time().steps(),
-        domain.space().steps(),
-        "...." // solver.()
-    );
+    info!("problem summary: {solver}");
+    info!("solving problem");
 
     solver.solve(u0j.as_ref())?;
 
