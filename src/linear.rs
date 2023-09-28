@@ -1,5 +1,5 @@
-use crate::{Domain, Driver, Float};
-use faer::Mat;
+use crate::{Domain, Float, Method};
+use faer_core::{Mat, MatMut, MatRef};
 
 // generic two-level linear numerical method matrix builder with periodic boundary conditions
 // where ql, qc, qr are
@@ -9,7 +9,7 @@ use faer::Mat;
 // in
 // U^{n+1}_j = \sum_{m=-l}^{r} q_m U^n_{j+m}
 // U^n_j = U^n_{j+N} for all j
-pub(crate) fn linear_periodic_scheme(
+pub(crate) fn linear_periodic_matrix(
     size: usize,
     ql: &[Float],
     qc: Float,
@@ -56,81 +56,54 @@ pub(crate) fn linear_periodic_scheme(
     p * hb * q
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Schema {
-    BackwardEuler,
-    UpwindLeft,
-    UpwindRight,
-    LaxFriedrichs,
-    LaxWendroff,
-    LaxWarming,
-}
+macro_rules! linear_method {
+    ($name: ident, $p:ident, $ql: expr, $qc: expr, $qr: expr) => {
+        pub struct $name(Mat<Float>);
+        impl Method for $name {
+            type Meta = Float;
+            fn init(domain: &Domain, a: Float) -> Self {
+                let (t_step_size, x_step_size, x_steps) = (
+                    domain.time().step_size(),
+                    domain.space().step_size(),
+                    domain.space().steps(),
+                );
 
-use faer_core::{MatMut, MatRef};
-pub use Schema::*;
-
-#[derive(Clone, Debug)]
-pub struct LinearDriver {
-    schema: Schema,
-    b: Mat<Float>,
-}
-
-impl Driver for LinearDriver {
-    type Schema = Schema;
-
-    type Meta = Float;
-
-    fn init(schema: Schema, domain: &Domain, a: Float) -> Self {
-        let (t_step_size, x_step_size, x_steps) = (
-            domain.time().step_size(),
-            domain.space().step_size(),
-            domain.space().steps(),
-        );
-
-        let p = a * t_step_size / x_step_size;
-
-        let b = match schema {
-            BackwardEuler => linear_periodic_scheme(x_steps, &[0.5 * p], 1.0, &[-0.5 * p]),
-            UpwindLeft => linear_periodic_scheme(x_steps, &[p], 1.0 - p, &[]),
-            UpwindRight => linear_periodic_scheme(x_steps, &[], 1.0 + p, &[-p]),
-            LaxFriedrichs => {
-                linear_periodic_scheme(x_steps, &[0.5 + 0.5 * p], 0.0, &[0.5 - 0.5 * p])
+                let $p = a * t_step_size / x_step_size;
+                Self(linear_periodic_matrix(x_steps, $ql, $qc, $qr))
             }
-            LaxWendroff => linear_periodic_scheme(
-                x_steps,
-                &[0.5 * p * (p + 1.0)],
-                1.0 - p * p,
-                &[0.5 * p * (p - 1.0)],
-            ),
-            LaxWarming => linear_periodic_scheme(
-                x_steps,
-                &[p * (2.0 - p), 0.5 * p * (p - 1.0)],
-                1.0 - 1.5 * p + 0.5 * p * p,
-                &[],
-            ),
-        };
+            fn next_to(&self, current: MatRef<'_, Float>, out: MatMut<'_, Float>) {
+                faer_core::mul::matmul(
+                    out,
+                    self.0.as_ref(),
+                    current,
+                    None,
+                    1.0,
+                    faer_core::Parallelism::None,
+                )
+            }
 
-        Self { schema, b }
-    }
-    fn next_to(&self, unj: MatRef<'_, Float>, out: MatMut<'_, Float>) {
-        faer_core::mul::matmul(
-            out,
-            self.b.as_ref(),
-            unj,
-            None,
-            1.0,
-            faer_core::Parallelism::None,
-        )
-    }
-
-    fn summary(&self) -> &'static str {
-        match self.schema {
-            BackwardEuler => "Backward-Euler",
-            UpwindLeft => "Upwind (Left)",
-            UpwindRight => "Upwind (Right)",
-            LaxFriedrichs => "Lax-Friedrichs",
-            LaxWendroff => "Lax-Wendroff",
-            LaxWarming => "Lax-Warming",
+            fn name(&self) -> &'static str {
+                stringify!($name)
+            }
         }
-    }
+    };
 }
+
+linear_method!(BackwardEuler, p, &[0.5 * p], 1.0, &[-0.5 * p]);
+linear_method!(UpwindLeft, p, &[p], 1.0 - p, &[]);
+linear_method!(UpwindRight, p, &[], 1.0 + p, &[-p]);
+linear_method!(LaxFriedrichs, p, &[0.5 + 0.5 * p], 0.0, &[0.5 - 0.5 * p]);
+linear_method!(
+    LaxWendroff,
+    p,
+    &[0.5 * p * (p + 1.0)],
+    1.0 - p * p,
+    &[0.5 * p * (p - 1.0)]
+);
+linear_method!(
+    LaxWarming,
+    p,
+    &[p * (2.0 - p), 0.5 * p * (p - 1.0)],
+    1.0 - 1.5 * p + 0.5 * p * p,
+    &[]
+);

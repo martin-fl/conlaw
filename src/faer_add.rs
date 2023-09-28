@@ -11,10 +11,7 @@ pub fn apply_func(m: &Mat<Float>, f: impl Fn(Float) -> Float) -> Mat<Float> {
     Mat::from_fn(m.nrows(), m.ncols(), |i, j| f(m[(i, j)]))
 }
 
-pub fn write_mat_to_buffer(
-    m: MatRef<'_, Float>,
-    output: &mut io::BufWriter<impl Write>,
-) -> io::Result<()> {
+pub fn write_mat_to_buffer(m: MatRef<'_, Float>, output: &mut impl Write) -> io::Result<()> {
     // SAFETY: faer stores matrix in column-major order with the guarantee that columns
     //         are stored contiguously. We're here taking the first `m.nrows()` elements,
     //         which is the length of 1 column.
@@ -28,9 +25,7 @@ pub fn write_mat_to_buffer(
             .map(|x| x.to_string())
             .collect::<Vec<_>>()
             .join(",")
-    )?;
-
-    Ok(())
+    )
 }
 
 pub fn broadcast_inplace(f: impl Fn(Float) -> Float, m: MatMut<'_, Float>) {
