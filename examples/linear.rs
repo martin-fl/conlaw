@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use tracing::info;
 
-use conlaw::{faer_add::broadcast, linear, DimensionKind, Domain, Driver, Float, Grid};
+use conlaw::{faer_add::broadcast, linear, DimensionKind, Driver, Grid1D, Mesh};
 
 fn main() -> io::Result<()> {
     tracing_subscriber::fmt::init();
@@ -9,16 +9,16 @@ fn main() -> io::Result<()> {
     info!("setting up problem data");
 
     // advection coefficient
-    let a = 1.0 as Float;
+    let a = 1.0;
     // initial condition
-    // let u0 = |x: Float| 0.5 * (-100.0 * (x + 0.5).powi(2)).exp() + 0.25;
-    let u0 = |x: Float| if -0.9 < x && x < -0.4 { 0.75 } else { 0.25 };
+    let u0 = |x: f32| 0.5 * (-100.0 * (x + 0.5).powi(2)).exp() + 0.25;
+    // let u0 = |x| if -0.9 < x && x < -0.4 { 0.75 } else { 0.25 };
 
-    let domain = Domain::new(
-        Grid::from_step_size(0.0, 1.0, 1e-1),
-        Grid::from_step_size(-1.0, 1.0, 1e-2),
+    let domain = Mesh::new(
+        Grid1D::from_step_size(0.0, 1.0, 1e-1),
+        Grid1D::from_step_size(-1.0, 1.0, 1e-2),
     )
-    .adjust_cfl(DimensionKind::Time, 0.5, a.abs());
+    .adjust_cfl(DimensionKind::Time, 0.5, a);
 
     let xj = domain.space().get();
 
@@ -32,7 +32,8 @@ fn main() -> io::Result<()> {
 
     info!("building problem solver");
 
-    let mut solver = Driver::<linear::LaxWarming>::init(domain.clone(), a).save_to(&mut output);
+    let mut solver =
+        Driver::<linear::UpwindLeft<f32>, _>::init(domain.clone(), a).save_to(&mut output);
 
     info!("problem summary: {solver}");
     info!("solving problem");

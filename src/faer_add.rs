@@ -1,43 +1,40 @@
-use crate::Float;
 use faer::Mat;
-use faer_core::{MatMut, MatRef};
+use faer_core::{ComplexField, Entity, MatMut, MatRef, RealField, SimpleEntity};
 use std::io::{self, Write};
 
-pub fn linspace(a: Float, size: usize, h: Float) -> Mat<Float> {
-    Mat::<Float>::from_fn(size, 1, |i, _| a + h * i as Float)
-}
+pub trait Float: RealField + SimpleEntity + Copy {}
+impl<T> Float for T where T: RealField + SimpleEntity + Copy {}
 
-pub fn apply_func(m: &Mat<Float>, f: impl Fn(Float) -> Float) -> Mat<Float> {
-    Mat::from_fn(m.nrows(), m.ncols(), |i, j| f(m[(i, j)]))
-}
-
-pub fn write_mat_to_buffer(m: MatRef<'_, Float>, output: &mut impl Write) -> io::Result<()> {
+pub fn write_mat_to_buffer<F: SimpleEntity + std::fmt::Debug>(
+    m: MatRef<'_, F>,
+    output: &mut impl Write,
+) -> io::Result<()> {
     // SAFETY: faer stores matrix in column-major order with the guarantee that columns
     //         are stored contiguously. We're here taking the first `m.nrows()` elements,
     //         which is the length of 1 column.
-    let m_data: &[Float] = unsafe { std::slice::from_raw_parts(m.as_ptr(), m.nrows()) };
+    let m_data = unsafe { std::slice::from_raw_parts(F::from_group(m.as_ptr()), m.nrows()) };
 
     writeln!(
         output,
         "{}",
         m_data
             .iter()
-            .map(|x| x.to_string())
+            .map(|x| format!("{:?}", x))
             .collect::<Vec<_>>()
             .join(",")
     )
 }
 
-pub fn broadcast_inplace(f: impl Fn(Float) -> Float, m: MatMut<'_, Float>) {
+pub fn broadcast_inplace<F: Entity>(f: impl Fn(F) -> F, m: MatMut<'_, F>) {
     faer_core::zipped!(m).for_each(|mut c| c.write(f(c.read())));
 }
 
-pub fn broadcast_to(f: impl Fn(Float) -> Float, m: MatRef<'_, Float>, out: MatMut<'_, Float>) {
+pub fn broadcast_to<F: Entity>(f: impl Fn(F) -> F, m: MatRef<'_, F>, out: MatMut<'_, F>) {
     faer_core::zipped!(out, m).for_each(|mut out, m| out.write(f(m.read())))
 }
 
-pub fn broadcast(f: impl Fn(Float) -> Float, m: MatRef<'_, Float>) -> Mat<Float> {
-    let mut out = m.to_owned();
+pub fn broadcast<F: ComplexField>(f: impl Fn(F) -> F, m: MatRef<'_, F>) -> Mat<F> {
+    let mut out = Mat::zeros(m.nrows(), m.ncols());
     broadcast_to(f, m, out.as_mut());
     out
 }

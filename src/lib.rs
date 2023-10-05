@@ -3,22 +3,22 @@ pub mod faer_add;
 pub mod linear;
 pub mod non_linear;
 
-pub type Float = f32;
+pub use faer_add::Float;
 
 pub mod grid;
 use std::io::{self, Write};
 
 use faer_core::{zipped, Mat, MatMut, MatRef};
-pub use grid::{DimensionKind, Domain, Grid};
+pub use grid::{DimensionKind, Grid1D, Mesh};
 
-pub trait Method {
+pub trait Method<F: Float> {
     type Meta;
 
-    fn init(domain: &Domain, meta: Self::Meta) -> Self;
+    fn init(domain: &Mesh<F>, meta: Self::Meta) -> Self;
 
-    fn next_to(&mut self, current: MatRef<'_, Float>, out: MatMut<'_, Float>);
+    fn next_to(&mut self, current: MatRef<'_, F>, out: MatMut<'_, F>);
 
-    fn next(&mut self, current: MatRef<'_, Float>) -> Mat<Float> {
+    fn next(&mut self, current: MatRef<'_, F>) -> Mat<F> {
         let mut out = current.to_owned();
         self.next_to(current, out.as_mut());
         out
@@ -29,13 +29,13 @@ pub trait Method {
     }
 }
 
-pub enum SolutionOutput<W = io::Sink> {
-    Memory(Mat<Float>),
+pub enum SolutionOutput<F: Float, W = io::Sink> {
+    Memory(Mat<F>),
     IO(W),
 }
 
-impl<W: Write> SolutionOutput<W> {
-    fn save<'a>(&'a mut self, u: MatRef<'a, Float>, i: usize) -> io::Result<()> {
+impl<F: Float, W: Write> SolutionOutput<F, W> {
+    fn save<'a>(&'a mut self, u: MatRef<'a, F>, i: usize) -> io::Result<()> {
         match self {
             SolutionOutput::Memory(m) => {
                 assert!(u.ncols() == 1);
@@ -47,14 +47,14 @@ impl<W: Write> SolutionOutput<W> {
     }
 }
 
-pub struct Driver<M, W = io::Sink> {
+pub struct Driver<M, F: Float, W = io::Sink> {
     method: M,
-    domain: Domain,
-    output: Option<SolutionOutput<W>>,
+    domain: Mesh<F>,
+    output: Option<SolutionOutput<F, W>>,
 }
 
-impl<M: Method, W> Driver<M, W> {
-    pub fn init(domain: Domain, meta: M::Meta) -> Self {
+impl<F: Float, M: Method<F>, W> Driver<M, F, W> {
+    pub fn init(domain: Mesh<F>, meta: M::Meta) -> Self {
         Self {
             method: M::init(&domain, meta),
             domain,
@@ -71,7 +71,7 @@ impl<M: Method, W> Driver<M, W> {
         self
     }
 
-    pub fn save_to<V: Write>(self, out: V) -> Driver<M, V> {
+    pub fn save_to<V: Write>(self, out: V) -> Driver<M, F, V> {
         Driver {
             method: self.method,
             domain: self.domain,
@@ -79,7 +79,7 @@ impl<M: Method, W> Driver<M, W> {
         }
     }
 
-    pub fn get_solution(&self) -> Option<MatRef<'_, Float>> {
+    pub fn get_solution(&self) -> Option<MatRef<'_, F>> {
         match &self.output {
             None | Some(SolutionOutput::IO(_)) => None,
             Some(SolutionOutput::Memory(m)) => Some(m.as_ref()),
@@ -87,7 +87,7 @@ impl<M: Method, W> Driver<M, W> {
     }
 }
 
-impl<M: Method, W> std::fmt::Display for Driver<M, W> {
+impl<F: Float + std::fmt::Display, M: Method<F>, W> std::fmt::Display for Driver<M, F, W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -106,8 +106,8 @@ impl<M: Method, W> std::fmt::Display for Driver<M, W> {
     }
 }
 
-impl<M: Method, W: Write> Driver<M, W> {
-    pub fn solve(&mut self, u0j: MatRef<'_, Float>) -> io::Result<()> {
+impl<F: Float, M: Method<F>, W: Write> Driver<M, F, W> {
+    pub fn solve(&mut self, u0j: MatRef<'_, F>) -> io::Result<()> {
         let mut unj = u0j.to_owned();
         let mut temp = unj.clone();
 

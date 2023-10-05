@@ -5,17 +5,17 @@ use faer::Mat;
 // grid[i] <-> lower + i * step_size forall i
 // grid[steps] <-> upper
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Grid {
-    lower: Float,
-    upper: Float,
+pub struct Grid1D<F> {
+    lower: F,
+    upper: F,
     steps: usize,
-    step_size: Float,
+    step_size: F,
 }
 
-impl Grid {
-    pub fn from_steps(lower: Float, upper: Float, steps: usize) -> Self {
-        let step_size = (upper - lower) / steps as Float;
-        Grid {
+impl<F: Float> Grid1D<F> {
+    pub fn from_steps(lower: F, upper: F, steps: usize) -> Self {
+        let step_size = upper.sub(&lower).div(&F::from_f64(steps as f64));
+        Grid1D {
             lower,
             upper,
             steps,
@@ -23,26 +23,35 @@ impl Grid {
         }
     }
 
-    pub fn from_step_size(lower: Float, upper: Float, step_size: Float) -> Self {
-        let steps = (upper - lower) / step_size;
-        Self::from_steps(lower, upper, steps.ceil() as usize)
+    pub fn from_step_size(lower: F, upper: F, step_size: F) -> Self
+    where
+        F: Into<f64>,
+    {
+        let steps = upper.sub(&lower).div(&step_size);
+        Self::from_steps(lower, upper, steps.into().ceil() as usize)
     }
 
     pub fn set_steps(&mut self, steps: usize) {
         self.steps = steps;
-        self.step_size = (self.upper - self.lower) / self.steps as Float;
+        self.step_size = self
+            .upper
+            .sub(&self.lower)
+            .div(&F::from_f64(self.steps as f64));
     }
 
-    pub fn set_step_size(&mut self, step_size: Float) {
-        let steps = (self.upper - self.lower) / step_size;
-        self.set_steps(steps.ceil() as usize);
+    pub fn set_step_size(&mut self, step_size: F)
+    where
+        F: Into<f64>,
+    {
+        let steps = self.upper.sub(&self.lower).div(&step_size);
+        self.set_steps(steps.into().ceil() as usize);
     }
 
-    pub fn lower(&self) -> Float {
+    pub fn lower(&self) -> F {
         self.lower
     }
 
-    pub fn upper(&self) -> Float {
+    pub fn upper(&self) -> F {
         self.upper
     }
 
@@ -50,21 +59,21 @@ impl Grid {
         self.steps
     }
 
-    pub fn step_size(&self) -> Float {
+    pub fn step_size(&self) -> F {
         self.step_size
     }
 
-    pub fn get(&self) -> Mat<Float> {
+    pub fn get(&self) -> Mat<F> {
         Mat::from_fn(self.steps + 1, 1, |i, _| {
-            self.lower + self.step_size * i as Float
+            self.lower.add(&self.step_size.mul(&F::from_f64(i as f64)))
         })
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Domain {
-    time: Grid,
-    space: Grid,
+pub struct Mesh<F> {
+    time: Grid1D<F>,
+    space: Grid1D<F>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,28 +82,35 @@ pub enum DimensionKind {
     Space,
 }
 
-impl Domain {
-    pub fn new(time: Grid, space: Grid) -> Self {
+impl<F: Float> Mesh<F> {
+    pub fn new(time: Grid1D<F>, space: Grid1D<F>) -> Self {
         Self { time, space }
     }
 
     // Given a CFL number `cfl`, adjust the `kind` grid such that
     // `coeff * k / h == cfl` with `k` the time-grid step size and
     // `h` the space-grid step size.
-    pub fn adjust_cfl(mut self, kind: DimensionKind, cfl: Float, coeff: Float) -> Self {
+    pub fn adjust_cfl(mut self, kind: DimensionKind, cfl: F, coeff: F) -> Self
+    where
+        F: Into<f64>,
+    {
         match kind {
-            DimensionKind::Time => self.time.set_step_size(cfl * self.space.step_size / coeff),
-            DimensionKind::Space => self.space.set_step_size(coeff * self.time.step_size / cfl),
+            DimensionKind::Time => self
+                .time
+                .set_step_size(cfl.mul(&self.space.step_size).div(&coeff)),
+            DimensionKind::Space => self
+                .space
+                .set_step_size(coeff.mul(&self.time.step_size).div(&cfl)),
         }
 
         self
     }
 
-    pub fn time(&self) -> Grid {
+    pub fn time(&self) -> Grid1D<F> {
         self.time
     }
 
-    pub fn space(&self) -> Grid {
+    pub fn space(&self) -> Grid1D<F> {
         self.space
     }
 }
