@@ -23,6 +23,23 @@ pub trait Problem {
     fn flux(u: Self::Float) -> Self::Float;
 }
 
+pub trait LinearProblem {
+    type Float: SimpleFloat;
+
+    fn advection_coefficient() -> Self::Float;
+}
+
+impl<L, F: SimpleFloat> Problem for L
+where
+    L: LinearProblem<Float = F>,
+{
+    type Float = F;
+
+    fn flux(u: F) -> F {
+        L::advection_coefficient().mul(u)
+    }
+}
+
 pub trait Method<P: Problem> {
     fn init(mesh: &Mesh<P::Float>) -> Self;
 

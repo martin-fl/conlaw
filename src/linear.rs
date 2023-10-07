@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::{Mesh, Method, Problem, SimpleFloat};
+use crate::{LinearProblem, Mesh, Method, SimpleFloat};
 use faer_core::{Mat, MatMut, MatRef};
 
 // generic two-level linear numerical method matrix builder with periodic boundary conditions
@@ -62,23 +62,6 @@ pub(crate) fn linear_periodic_matrix<F: SimpleFloat>(
     );
 
     p * hb * q
-}
-
-pub trait LinearProblem {
-    type Float: SimpleFloat;
-
-    fn advection_coefficient() -> Self::Float;
-}
-
-impl<L, F: SimpleFloat> Problem for L
-where
-    L: LinearProblem<Float = F>,
-{
-    type Float = F;
-
-    fn flux(u: F) -> F {
-        L::advection_coefficient().mul(u)
-    }
 }
 
 macro_rules! linear_method {

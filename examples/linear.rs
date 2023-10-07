@@ -1,13 +1,10 @@
 use std::io;
 
-use conlaw::{
-    linear::{self, LinearProblem},
-    DimensionKind, Driver, Grid1D, Mesh,
-};
+use conlaw::{linear, DimensionKind, Driver, Grid1D, LinearProblem, Mesh};
 
 struct LinearAdvection;
 
-impl linear::LinearProblem for LinearAdvection {
+impl LinearProblem for LinearAdvection {
     type Float = f64;
 
     fn advection_coefficient() -> Self::Float {
@@ -26,7 +23,7 @@ fn main() -> io::Result<()> {
         LinearAdvection::advection_coefficient(),
     );
 
-    let mut solver = Driver::new(LinearAdvection, mesh, "output.mat")?;
+    let mut solver = Driver::new(LinearAdvection, mesh, "bin/output.mat")?;
 
     solver.solve::<linear::LaxWarming<_>>(|x| 0.5 * (-100.0 * (x + 0.5).powi(2)).exp() + 0.25)
 }
