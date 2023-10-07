@@ -8,10 +8,3 @@ bytemuck = "1.14.0"
 faer = "0.12.0"
 faer-core = "0.12.0"
 reborrow = "0.5.4"
-
-[dev-dependencies]
-criterion = "0.5.1"
-
-[[bench]]
-name = "faer_benches"
-harness = false
