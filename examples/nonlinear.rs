@@ -15,7 +15,7 @@ impl conlaw::Problem for LinearAdvection {
 fn main() -> io::Result<()> {
     let mesh = Mesh::new(
         Grid1D::from_step_size(0.0, 1.0, 1e-1),
-        Grid1D::from_step_size(-1.0, 1.0, 1e-2),
+        Grid1D::from_step_size(-1.0, 1.0, 1e-4),
     )
     .adjust_cfl(DimensionKind::Time, 0.5, 1.0);
 

@@ -1,17 +1,16 @@
 use std::io;
 
-use conlaw::{linear, DimensionKind, Driver, Grid1D, Mesh};
+use conlaw::{
+    linear::{self, LinearProblem},
+    DimensionKind, Driver, Grid1D, Mesh,
+};
 
 struct LinearAdvection;
 
-impl conlaw::Problem for LinearAdvection {
+impl linear::LinearProblem for LinearAdvection {
     type Float = f64;
 
-    fn flux(u: Self::Float) -> Self::Float {
-        u
-    }
-
-    fn jacobian(_: Self::Float) -> Self::Float {
+    fn advection_coefficient() -> Self::Float {
         1.0
     }
 }
@@ -21,7 +20,11 @@ fn main() -> io::Result<()> {
         Grid1D::from_step_size(0.0, 1.0, 1e-1),
         Grid1D::from_step_size(-1.0, 1.0, 1e-2),
     )
-    .adjust_cfl(DimensionKind::Time, 0.5, 1.0);
+    .adjust_cfl(
+        DimensionKind::Time,
+        0.8,
+        LinearAdvection::advection_coefficient(),
+    );
 
     let mut solver = Driver::new(LinearAdvection, mesh, "output.mat")?;
 

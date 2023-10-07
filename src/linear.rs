@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{Mesh, Method, Problem, SimpleFloat};
 use faer_core::{Mat, MatMut, MatRef};
 
@@ -22,24 +24,25 @@ pub(crate) fn linear_periodic_matrix<F: SimpleFloat>(
     let hb = Mat::from_fn(size, size, |i, j| {
         let m = j as isize - i as isize;
         let mm = m.unsigned_abs();
-        #[allow(clippy::collapsible_else_if, clippy::comparison_chain)]
-        if m == 0 {
-            qc
-        } else if m > 0 {
-            if mm <= r {
-                qr[mm - 1]
-            } else if mm >= size - l {
-                ql[(mm as isize - size as isize).unsigned_abs() - 1]
-            } else {
-                F::zero()
+        match m.cmp(&0) {
+            Ordering::Greater => {
+                if mm <= r {
+                    qr[mm - 1]
+                } else if mm >= size - l {
+                    ql[(mm as isize - size as isize).unsigned_abs() - 1]
+                } else {
+                    F::zero()
+                }
             }
-        } else {
-            if mm <= l {
-                ql[mm - 1]
-            } else if mm >= size - r {
-                qr[(mm as isize - size as isize).unsigned_abs() - 1]
-            } else {
-                F::zero()
+            Ordering::Equal => qc,
+            Ordering::Less => {
+                if mm <= l {
+                    ql[mm - 1]
+                } else if mm >= size - r {
+                    qr[(mm as isize - size as isize).unsigned_abs() - 1]
+                } else {
+                    F::zero()
+                }
             }
         }
     });
@@ -55,27 +58,38 @@ pub(crate) fn linear_periodic_matrix<F: SimpleFloat>(
     let q = Mat::<F>::from_fn(
         size,
         size + 1,
-        |i, j| if i == j { F::one() } else { F::one() },
+        |i, j| if i == j { F::one() } else { F::zero() },
     );
 
     p * hb * q
 }
 
+pub trait LinearProblem {
+    type Float: SimpleFloat;
+
+    fn advection_coefficient() -> Self::Float;
+}
+
+impl<L, F: SimpleFloat> Problem for L
+where
+    L: LinearProblem<Float = F>,
+{
+    type Float = F;
+
+    fn flux(u: F) -> F {
+        L::advection_coefficient().mul(u)
+    }
+}
+
 macro_rules! linear_method {
     ($name: ident, $p:ident, $ql: expr, $qc: expr, $qr: expr) => {
         pub struct $name<F: SimpleFloat>(Mat<F>);
-        impl<F: SimpleFloat, P: Problem<Float = F>> Method<P> for $name<F> {
-            fn init(domain: &Mesh<F>) -> Self {
-                let (t_step_size, x_step_size, x_steps) = (
-                    domain.time().step_size(),
-                    domain.space().step_size(),
-                    domain.space().steps(),
-                );
-
-                // TODO: weird hack lol, fix the Problem trait so that linear methods can be a special case
-                let $p = P::jacobian(F::zero()).mul(t_step_size).div(x_step_size);
-                Self(linear_periodic_matrix(x_steps, $ql, $qc, $qr))
+        impl<F: SimpleFloat, P: LinearProblem<Float = F>> Method<P> for $name<F> {
+            fn init(mesh: &Mesh<F>) -> Self {
+                let $p = P::advection_coefficient().mul(mesh.dt()).div(mesh.dx());
+                Self(linear_periodic_matrix(mesh.nx(), $ql, $qc, $qr))
             }
+
             fn next_to(&mut self, current: MatRef<'_, F>, out: MatMut<'_, F>) {
                 faer_core::mul::matmul(
                     out,

@@ -95,12 +95,8 @@ impl<F: SimpleFloat> Mesh<F> {
         F: Into<f64>,
     {
         match kind {
-            DimensionKind::Time => self
-                .time
-                .set_step_size(cfl.mul(self.space.step_size).div(coeff)),
-            DimensionKind::Space => self
-                .space
-                .set_step_size(coeff.mul(self.time.step_size).div(cfl)),
+            DimensionKind::Time => self.time.set_step_size(cfl.mul(self.dx()).div(coeff)),
+            DimensionKind::Space => self.space.set_step_size(coeff.mul(self.dt()).div(cfl)),
         }
 
         self
@@ -112,5 +108,21 @@ impl<F: SimpleFloat> Mesh<F> {
 
     pub fn space(&self) -> Grid1D<F> {
         self.space
+    }
+
+    pub fn dt(&self) -> F {
+        self.time.step_size
+    }
+
+    pub fn dx(&self) -> F {
+        self.space.step_size
+    }
+
+    pub fn nt(&self) -> usize {
+        self.time.steps
+    }
+
+    pub fn nx(&self) -> usize {
+        self.space.steps
     }
 }

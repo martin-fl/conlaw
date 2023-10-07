@@ -1,12 +1,3 @@
-pub mod faer_add;
-
-pub mod linear;
-pub mod non_linear;
-
-pub use faer_add::SimpleFloat;
-use reborrow::*;
-
-pub mod grid;
 use std::{
     fs,
     io::{self, Write},
@@ -14,20 +5,23 @@ use std::{
 };
 
 use bytemuck::bytes_of;
-use faer_core::{zipped, Mat, MatMut, MatRef};
+use faer_core::{zipped, Mat, MatMut, MatRef, RealField, SimpleEntity};
+use reborrow::*;
+
+pub mod grid;
+pub mod linear;
+pub mod non_linear;
+
 pub use grid::{DimensionKind, Grid1D, Mesh};
+
+pub trait SimpleFloat: RealField + SimpleEntity + Copy {}
+impl<T> SimpleFloat for T where T: RealField + SimpleEntity + Copy {}
 
 pub trait Problem {
     type Float: SimpleFloat;
 
     fn flux(u: Self::Float) -> Self::Float;
-
-    fn jacobian(_u: Self::Float) -> Self::Float {
-        unimplemented!();
-    }
 }
-
-// Driver::new(problem, mesh, &mut output).solve::<non_linear::LaxFriedrichs>();
 
 pub trait Method<P: Problem> {
     fn init(mesh: &Mesh<P::Float>) -> Self;
@@ -77,11 +71,9 @@ where
         self.output
             .write_all(bytes_of(&(std::mem::size_of::<F>() as u8)))?;
         // write dimensions
-        self.output
-            .write_all(bytes_of(&(self.mesh.space().steps() as u32)))?;
+        self.output.write_all(bytes_of(&(self.mesh.nx() as u32)))?;
         self.output.write_all(bytes_of(&1u32))?;
-        self.output
-            .write_all(bytes_of(&(self.mesh.time().steps() as u32)))?;
+        self.output.write_all(bytes_of(&(self.mesh.nt() as u32)))?;
         // write bounds
         self.output
             .write_all(bytes_of(&self.mesh.space().lower()))?;

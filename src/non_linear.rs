@@ -9,10 +9,10 @@ pub struct LaxFriedrichs<F> {
 }
 
 impl<F: SimpleFloat, P: Problem<Float = F>> Method<P> for LaxFriedrichs<F> {
-    fn init(domain: &Mesh<P::Float>) -> Self {
+    fn init(mesh: &Mesh<P::Float>) -> Self {
         Self {
-            ratio: domain.time().step_size().div(domain.space().step_size()),
-            x_steps: domain.space().steps(),
+            ratio: mesh.dt().div(mesh.dx()),
+            x_steps: mesh.nx(),
         }
     }
 
@@ -50,11 +50,11 @@ pub struct MacCormack<F: SimpleFloat> {
 }
 
 impl<F: SimpleFloat, P: Problem<Float = F>> Method<P> for MacCormack<F> {
-    fn init(domain: &Mesh<F>) -> Self {
+    fn init(mesh: &Mesh<F>) -> Self {
         Self {
-            ratio: domain.time().step_size().div(domain.space().step_size()),
-            x_steps: domain.space().steps(),
-            w: Mat::zeros(domain.space().steps() + 1, 1),
+            ratio: mesh.dt().div(mesh.dx()),
+            x_steps: mesh.nx(),
+            w: Mat::zeros(mesh.nt() + 1, 1),
         }
     }
 
