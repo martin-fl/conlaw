@@ -3,126 +3,133 @@ pub mod faer_add;
 pub mod linear;
 pub mod non_linear;
 
-pub use faer_add::Float;
+pub use faer_add::SimpleFloat;
+use reborrow::*;
 
 pub mod grid;
-use std::io::{self, Write};
+use std::{
+    fs,
+    io::{self, Write},
+    path::Path,
+};
 
+use bytemuck::bytes_of;
 use faer_core::{zipped, Mat, MatMut, MatRef};
 pub use grid::{DimensionKind, Grid1D, Mesh};
 
-pub trait Method<F: Float> {
-    type Meta;
+pub trait Problem {
+    type Float: SimpleFloat;
 
-    fn init(domain: &Mesh<F>, meta: Self::Meta) -> Self;
+    fn flux(u: Self::Float) -> Self::Float;
 
-    fn next_to(&mut self, current: MatRef<'_, F>, out: MatMut<'_, F>);
+    fn jacobian(_u: Self::Float) -> Self::Float {
+        unimplemented!();
+    }
+}
 
-    fn next(&mut self, current: MatRef<'_, F>) -> Mat<F> {
-        let mut out = current.to_owned();
+// Driver::new(problem, mesh, &mut output).solve::<non_linear::LaxFriedrichs>();
+
+pub trait Method<P: Problem> {
+    fn init(mesh: &Mesh<P::Float>) -> Self;
+
+    fn next_to(&mut self, current: MatRef<'_, P::Float>, out: MatMut<'_, P::Float>);
+
+    fn next(&mut self, current: MatRef<'_, P::Float>) -> Mat<P::Float> {
+        let mut out = Mat::zeros(current.nrows(), current.ncols());
         self.next_to(current, out.as_mut());
         out
     }
 
-    fn name(&self) -> &'static str {
+    fn name() -> &'static str {
         "Unspecified"
     }
 }
 
-pub enum SolutionOutput<F: Float, W = io::Sink> {
-    Memory(Mat<F>),
-    IO(W),
+const SOLUTION_FILE_FORMAT_HEADER: &'static [u8] = b"CSFF1";
+
+pub struct Driver<P, F> {
+    #[allow(dead_code)]
+    problem: P,
+    mesh: Mesh<F>,
+    output: io::BufWriter<fs::File>,
 }
 
-impl<F: Float, W: Write> SolutionOutput<F, W> {
-    fn save<'a>(&'a mut self, u: MatRef<'a, F>, i: usize) -> io::Result<()> {
-        match self {
-            SolutionOutput::Memory(m) => {
-                assert!(u.ncols() == 1);
-                zipped!(m.as_mut().col(i), u.as_ref()).for_each(|mut mi, ui| mi.write(ui.read()));
-                Ok(())
-            }
-            SolutionOutput::IO(output) => faer_add::write_mat_to_buffer(u, output),
-        }
-    }
-}
-
-pub struct Driver<M, F: Float, W = io::Sink> {
-    method: M,
-    domain: Mesh<F>,
-    output: Option<SolutionOutput<F, W>>,
-}
-
-impl<F: Float, M: Method<F>, W> Driver<M, F, W> {
-    pub fn init(domain: Mesh<F>, meta: M::Meta) -> Self {
-        Self {
-            method: M::init(&domain, meta),
-            domain,
-            output: None,
-        }
+impl<P, F> Driver<P, F>
+where
+    F: SimpleFloat,
+    P: Problem<Float = F>,
+{
+    pub fn new(problem: P, mesh: Mesh<F>, output: impl AsRef<Path>) -> io::Result<Self> {
+        Ok(Self {
+            problem,
+            mesh,
+            output: io::BufWriter::new(fs::File::create(output)?),
+        })
     }
 
-    pub fn save_in_memory(mut self) -> Self {
-        self.output = Some(SolutionOutput::Memory(Mat::zeros(
-            self.domain.space().steps() + 1,
-            self.domain.time().steps() + 1,
-        )));
+    pub fn solve<M: Method<P>>(&mut self, u0: impl Fn(P::Float) -> P::Float) -> io::Result<()> {
+        let mut buffer = Mat::zeros(self.mesh.space().steps() + 1, 2);
+        let [mut u, mut v] = buffer.as_mut().split_at_col(1);
 
-        self
-    }
+        // magic bytes
+        self.output.write_all(SOLUTION_FILE_FORMAT_HEADER)?;
+        // write float precision
+        self.output
+            .write_all(bytes_of(&(std::mem::size_of::<F>() as u8)))?;
+        // write dimensions
+        self.output
+            .write_all(bytes_of(&(self.mesh.space().steps() as u32)))?;
+        self.output.write_all(bytes_of(&1u32))?;
+        self.output
+            .write_all(bytes_of(&(self.mesh.time().steps() as u32)))?;
+        // write bounds
+        self.output
+            .write_all(bytes_of(&self.mesh.space().lower()))?;
+        self.output
+            .write_all(bytes_of(&self.mesh.space().upper()))?;
+        self.output.write_all(bytes_of(&self.mesh.time().lower()))?;
+        self.output.write_all(bytes_of(&self.mesh.time().upper()))?;
+        // write method name
+        let name = M::name().as_bytes();
+        self.output.write_all(bytes_of(&(name.len() as u32)))?;
+        self.output.write_all(name)?;
 
-    pub fn save_to<V: Write>(self, out: V) -> Driver<M, F, V> {
-        Driver {
-            method: self.method,
-            domain: self.domain,
-            output: Some(SolutionOutput::IO(out)),
+        // set initial condition
+        zipped!(u.rb_mut(), self.mesh.space().get().as_ref())
+            .for_each(|mut u, x| u.write(u0(x.read())));
+
+        // beginning marker
+        self.output.write_all(&[0xFF, 0xFF, 0xFF, 0xFF])?;
+
+        let mut col_buffer = Vec::<u8>::with_capacity(
+            (self.mesh.space().steps() + 1) * 1 * std::mem::size_of::<F>(),
+        );
+
+        let mut save = |u: MatRef<'_, F>| -> io::Result<()> {
+            let u_slice =
+                unsafe { std::slice::from_raw_parts(F::from_group(u.rb().as_ptr()), u.nrows()) };
+            col_buffer.extend(u_slice.iter().map(|x| bytes_of(x)).flatten());
+            self.output.write_all(&col_buffer)?;
+            col_buffer.truncate(0);
+            Ok(())
+        };
+
+        save(u.rb())?;
+
+        // setup method
+        let mut method = M::init(&self.mesh);
+
+        for _ in 0..self.mesh.time().steps() {
+            // propagate u into v
+            method.next_to(u.rb(), v.rb_mut());
+            std::mem::swap(&mut u, &mut v);
+
+            save(u.rb())?;
         }
-    }
 
-    pub fn get_solution(&self) -> Option<MatRef<'_, F>> {
-        match &self.output {
-            None | Some(SolutionOutput::IO(_)) => None,
-            Some(SolutionOutput::Memory(m)) => Some(m.as_ref()),
-        }
-    }
-}
+        // end marker
+        self.output.write_all(&[0xFF, 0xFF, 0xFF, 0xFF])?;
 
-impl<F: Float + std::fmt::Display, M: Method<F>, W> std::fmt::Display for Driver<M, F, W> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} method, Δt={} ({} steps), Δx={} ({} steps) ({})",
-            self.method.name(),
-            self.domain.time().step_size(),
-            self.domain.time().steps(),
-            self.domain.space().step_size(),
-            self.domain.space().steps(),
-            match &self.output {
-                Some(SolutionOutput::Memory(_)) => "saved in memory",
-                Some(SolutionOutput::IO(_)) => "saved to IO",
-                None => "not saved",
-            }
-        )
-    }
-}
-
-impl<F: Float, M: Method<F>, W: Write> Driver<M, F, W> {
-    pub fn solve(&mut self, u0j: MatRef<'_, F>) -> io::Result<()> {
-        let mut unj = u0j.to_owned();
-        let mut temp = unj.clone();
-
-        if let Some(so) = self.output.as_mut() {
-            so.save(unj.as_ref(), 0)?;
-        }
-
-        for n in 1..self.domain.time().steps() {
-            self.method.next_to(unj.as_ref(), temp.as_mut());
-            if let Some(so) = self.output.as_mut() {
-                so.save(temp.as_ref(), n)?;
-            }
-            std::mem::swap(&mut unj, &mut temp);
-        }
-
-        Ok(())
+        self.output.flush()
     }
 }

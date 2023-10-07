@@ -3,18 +3,14 @@ name = "conlaw"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-faer = "0.11.0"
-faer-core = "0.11.0"
+bytemuck = "1.14.0"
+faer = "0.12.0"
+faer-core = "0.12.0"
 reborrow = "0.5.4"
-tracing = "0.1.37"
-tracing-subscriber = "0.3.17"
 
 [dev-dependencies]
 criterion = "0.5.1"
-
 
 [[bench]]
 name = "faer_benches"

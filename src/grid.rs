@@ -1,4 +1,4 @@
-use crate::Float;
+use crate::SimpleFloat;
 use faer::Mat;
 
 // grid[0] <-> lower
@@ -12,9 +12,9 @@ pub struct Grid1D<F> {
     step_size: F,
 }
 
-impl<F: Float> Grid1D<F> {
+impl<F: SimpleFloat> Grid1D<F> {
     pub fn from_steps(lower: F, upper: F, steps: usize) -> Self {
-        let step_size = upper.sub(&lower).div(&F::from_f64(steps as f64));
+        let step_size = upper.sub(lower).div(F::from_f64(steps as f64));
         Grid1D {
             lower,
             upper,
@@ -27,7 +27,7 @@ impl<F: Float> Grid1D<F> {
     where
         F: Into<f64>,
     {
-        let steps = upper.sub(&lower).div(&step_size);
+        let steps = upper.sub(lower).div(step_size);
         Self::from_steps(lower, upper, steps.into().ceil() as usize)
     }
 
@@ -35,15 +35,15 @@ impl<F: Float> Grid1D<F> {
         self.steps = steps;
         self.step_size = self
             .upper
-            .sub(&self.lower)
-            .div(&F::from_f64(self.steps as f64));
+            .sub(self.lower)
+            .div(F::from_f64(self.steps as f64));
     }
 
     pub fn set_step_size(&mut self, step_size: F)
     where
         F: Into<f64>,
     {
-        let steps = self.upper.sub(&self.lower).div(&step_size);
+        let steps = self.upper.sub(self.lower).div(step_size);
         self.set_steps(steps.into().ceil() as usize);
     }
 
@@ -65,7 +65,7 @@ impl<F: Float> Grid1D<F> {
 
     pub fn get(&self) -> Mat<F> {
         Mat::from_fn(self.steps + 1, 1, |i, _| {
-            self.lower.add(&self.step_size.mul(&F::from_f64(i as f64)))
+            self.lower.add(self.step_size.mul(F::from_f64(i as f64)))
         })
     }
 }
@@ -82,7 +82,7 @@ pub enum DimensionKind {
     Space,
 }
 
-impl<F: Float> Mesh<F> {
+impl<F: SimpleFloat> Mesh<F> {
     pub fn new(time: Grid1D<F>, space: Grid1D<F>) -> Self {
         Self { time, space }
     }
@@ -97,10 +97,10 @@ impl<F: Float> Mesh<F> {
         match kind {
             DimensionKind::Time => self
                 .time
-                .set_step_size(cfl.mul(&self.space.step_size).div(&coeff)),
+                .set_step_size(cfl.mul(self.space.step_size).div(coeff)),
             DimensionKind::Space => self
                 .space
-                .set_step_size(coeff.mul(&self.time.step_size).div(&cfl)),
+                .set_step_size(coeff.mul(self.time.step_size).div(cfl)),
         }
 
         self

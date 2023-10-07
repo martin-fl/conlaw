@@ -1,12 +1,12 @@
 use std::sync::OnceLock;
 
 use conlaw::faer_add::{apply_func, broadcast};
-use conlaw::Float;
+use conlaw::SimpleFloat;
 use faer::Mat;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-fn burger_flux_function(u: Float) -> Float {
+fn burger_flux_function(u: SimpleFloat) -> SimpleFloat {
     0.5 * u * u
 }
 
@@ -16,13 +16,13 @@ fn benchmark_burger_flux_function(c: &mut Criterion) {
     });
 }
 
-static U: OnceLock<Mat<Float>> = OnceLock::new();
+static U: OnceLock<Mat<SimpleFloat>> = OnceLock::new();
 
 fn benchmark_apply_func(c: &mut Criterion) {
     c.bench_function("apply_func", |b| {
         b.iter(|| {
             apply_func(
-                U.get_or_init(|| Mat::from_fn(40, 1, |i, _| 40.0 * i as Float)),
+                U.get_or_init(|| Mat::from_fn(40, 1, |i, _| 40.0 * i as SimpleFloat)),
                 burger_flux_function,
             )
         })
@@ -34,7 +34,7 @@ fn benchmark_broadcast(c: &mut Criterion) {
         b.iter(|| {
             broadcast(
                 burger_flux_function,
-                U.get_or_init(|| Mat::from_fn(40, 1, |i, _| 40.0 * i as Float))
+                U.get_or_init(|| Mat::from_fn(40, 1, |i, _| 40.0 * i as SimpleFloat))
                     .as_ref(),
             )
         })

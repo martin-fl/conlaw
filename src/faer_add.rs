@@ -2,8 +2,8 @@ use faer::Mat;
 use faer_core::{ComplexField, Entity, MatMut, MatRef, RealField, SimpleEntity};
 use std::io::{self, Write};
 
-pub trait Float: RealField + SimpleEntity + Copy {}
-impl<T> Float for T where T: RealField + SimpleEntity + Copy {}
+pub trait SimpleFloat: RealField + SimpleEntity + Copy {}
+impl<T> SimpleFloat for T where T: RealField + SimpleEntity + Copy {}
 
 pub fn write_mat_to_buffer<F: SimpleEntity + std::fmt::Debug>(
     m: MatRef<'_, F>,

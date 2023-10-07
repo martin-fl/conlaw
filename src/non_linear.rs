@@ -1,36 +1,30 @@
-use std::rc::Rc;
-
 use reborrow::*;
 
-use crate::{Float, Mesh, Method};
+use crate::{Mesh, Method, Problem, SimpleFloat};
 use faer_core::{zipped, Mat, MatMut, MatRef};
 
 pub struct LaxFriedrichs<F> {
-    flux: Rc<dyn Fn(F) -> F>,
     ratio: F,
     x_steps: usize,
 }
 
-impl<F: Float> Method<F> for LaxFriedrichs<F> {
-    type Meta = Rc<dyn Fn(F) -> F>;
-
-    fn init(domain: &Mesh<F>, flux: Self::Meta) -> Self {
+impl<F: SimpleFloat, P: Problem<Float = F>> Method<P> for LaxFriedrichs<F> {
+    fn init(domain: &Mesh<P::Float>) -> Self {
         Self {
-            flux,
-            ratio: domain.time().step_size().div(&domain.space().step_size()),
+            ratio: domain.time().step_size().div(domain.space().step_size()),
             x_steps: domain.space().steps(),
         }
     }
 
-    fn next_to(&mut self, current: MatRef<'_, F>, mut out: MatMut<'_, F>) {
-        let f = self.flux.clone();
+    fn next_to(&mut self, current: MatRef<'_, P::Float>, mut out: MatMut<'_, P::Float>) {
+        let f = P::flux;
         let vp = current.submatrix(2, 0, self.x_steps - 1, 1);
         let vm = current.submatrix(0, 0, self.x_steps - 1, 1);
 
         // lax-friedrichs schema
         // let schema = |vm, vp| 0.5 * (vm + vp) - 0.5 * self.ratio * (f(vp) - f(vm));
-        let schema = |vm: F, vp: F| {
-            (vm.add(&vp).sub(&self.ratio.mul(&f(vp).sub(&f(vm))))).mul(&F::from_f64(0.5))
+        let schema = |vm: P::Float, vp: P::Float| {
+            (vm.add(vp).sub(self.ratio.mul(f(vp).sub(f(vm))))).mul(F::from_f64(0.5))
         };
 
         // compute solution at time t_{n+1}
@@ -44,43 +38,39 @@ impl<F: Float> Method<F> for LaxFriedrichs<F> {
         out[(self.x_steps, 0)] = out[(0, 0)];
     }
 
-    fn name(&self) -> &'static str {
+    fn name() -> &'static str {
         "Conservative LaxFriedrichs"
     }
 }
 
-pub struct MacCormack<F: Float> {
-    flux: Rc<dyn Fn(F) -> F>,
+pub struct MacCormack<F: SimpleFloat> {
     ratio: F,
     x_steps: usize,
     w: Mat<F>,
 }
 
-impl<F: Float> Method<F> for MacCormack<F> {
-    type Meta = Rc<dyn Fn(F) -> F>;
-
-    fn init(domain: &Mesh<F>, flux: Self::Meta) -> Self {
+impl<F: SimpleFloat, P: Problem<Float = F>> Method<P> for MacCormack<F> {
+    fn init(domain: &Mesh<F>) -> Self {
         Self {
-            flux,
-            ratio: domain.time().step_size().div(&domain.space().step_size()),
+            ratio: domain.time().step_size().div(domain.space().step_size()),
             x_steps: domain.space().steps(),
             w: Mat::zeros(domain.space().steps() + 1, 1),
         }
     }
 
     fn next_to(&mut self, current: MatRef<'_, F>, mut out: MatMut<'_, F>) {
-        let f = self.flux.clone();
+        let f = P::flux;
         let v = current.submatrix(1, 0, self.x_steps - 1, 1);
         let vp = current.submatrix(2, 0, self.x_steps - 1, 1);
         let w = self.w.as_mut().submatrix(1, 0, self.x_steps - 1, 1);
 
         // let schema_1 = |v, vp| v - self.ratio * (f(vp) - f(v));
         // let schema_2 = |v, wm, w| 0.5 * (v + w) - 0.5 * self.ratio * (f(w) - f(wm));
-        let schema_1 = |v: F, vp: F| v.sub(&self.ratio.mul(&f(vp).sub(&f(v))));
+        let schema_1 = |v: F, vp: F| v.sub(self.ratio.mul(vp.sub(f(v))));
         let schema_2 = |v: F, wm: F, w: F| {
-            v.add(&w)
-                .sub(&self.ratio.mul(&f(w).sub(&f(wm))))
-                .mul(&F::from_f64(0.5))
+            v.add(w)
+                .sub(self.ratio.mul(f(w).sub(f(wm))))
+                .mul(F::from_f64(0.5))
         };
 
         zipped!(w, v, vp).for_each(|mut w, v, vp| w.write(schema_1(v.read(), vp.read())));
@@ -101,7 +91,7 @@ impl<F: Float> Method<F> for MacCormack<F> {
         out[(self.x_steps, 0)] = out[(0, 0)];
     }
 
-    fn name(&self) -> &'static str {
+    fn name() -> &'static str {
         "MacCormack"
     }
 }

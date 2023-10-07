@@ -1,4 +1,4 @@
-use crate::{Float, Mesh, Method};
+use crate::{Mesh, Method, Problem, SimpleFloat};
 use faer_core::{Mat, MatMut, MatRef};
 
 // generic two-level linear numerical method matrix builder with periodic boundary conditions
@@ -9,7 +9,12 @@ use faer_core::{Mat, MatMut, MatRef};
 // in
 // U^{n+1}_j = \sum_{m=-l}^{r} q_m U^n_{j+m}
 // U^n_j = U^n_{j+N} for all j
-pub(crate) fn linear_periodic_matrix<F: Float>(size: usize, ql: &[F], qc: F, qr: &[F]) -> Mat<F> {
+pub(crate) fn linear_periodic_matrix<F: SimpleFloat>(
+    size: usize,
+    ql: &[F],
+    qc: F,
+    qr: &[F],
+) -> Mat<F> {
     let l = ql.len();
     let r = qr.len();
     assert!(l + r < size);
@@ -58,17 +63,17 @@ pub(crate) fn linear_periodic_matrix<F: Float>(size: usize, ql: &[F], qc: F, qr:
 
 macro_rules! linear_method {
     ($name: ident, $p:ident, $ql: expr, $qc: expr, $qr: expr) => {
-        pub struct $name<F: Float>(Mat<F>);
-        impl<F: Float> Method<F> for $name<F> {
-            type Meta = F;
-            fn init(domain: &Mesh<F>, a: F) -> Self {
+        pub struct $name<F: SimpleFloat>(Mat<F>);
+        impl<F: SimpleFloat, P: Problem<Float = F>> Method<P> for $name<F> {
+            fn init(domain: &Mesh<F>) -> Self {
                 let (t_step_size, x_step_size, x_steps) = (
                     domain.time().step_size(),
                     domain.space().step_size(),
                     domain.space().steps(),
                 );
 
-                let $p = a.mul(&t_step_size).div(&x_step_size);
+                // TODO: weird hack lol, fix the Problem trait so that linear methods can be a special case
+                let $p = P::jacobian(F::zero()).mul(t_step_size).div(x_step_size);
                 Self(linear_periodic_matrix(x_steps, $ql, $qc, $qr))
             }
             fn next_to(&mut self, current: MatRef<'_, F>, out: MatMut<'_, F>) {
@@ -82,7 +87,7 @@ macro_rules! linear_method {
                 )
             }
 
-            fn name(&self) -> &'static str {
+            fn name() -> &'static str {
                 stringify!($name)
             }
         }
@@ -92,30 +97,35 @@ macro_rules! linear_method {
 linear_method!(
     BackwardEuler,
     p,
-    &[F::from_f64(0.5).mul(&p)],
+    &[F::from_f64(0.5).mul(p)],
     F::one(),
-    &[F::from_f64(-0.5).mul(&p)]
+    &[F::from_f64(-0.5).mul(p)]
 );
-linear_method!(UpwindLeft, p, &[p], F::one().sub(&p), &[]);
-linear_method!(UpwindRight, p, &[], F::one().add(&p), &[p.neg()]);
+linear_method!(UpwindLeft, p, &[p], F::one().sub(p), &[]);
+linear_method!(UpwindRight, p, &[], F::one().add(p), &[p.neg()]);
 linear_method!(
     LaxFriedrichs,
     p,
-    &[F::from_f64(0.5).add(&F::from_f64(0.5).mul(&p))],
+    &[F::from_f64(0.5).add(F::from_f64(0.5).mul(p))],
     F::zero(),
-    &[F::from_f64(0.5).sub(&F::from_f64(0.5).mul(&p))]
+    &[F::from_f64(0.5).sub(F::from_f64(0.5).mul(p))]
 );
-// linear_method!(
-//     LaxWendroff,
-//     p,
-//     &[0.5 * p * (p + 1.0)],
-//     1.0 - p * p,
-//     &[0.5 * p * (p - 1.0)]
-// );
-// linear_method!(
-//     LaxWarming,
-//     p,
-//     &[p * (2.0 - p), 0.5 * p * (p - 1.0)],
-//     1.0 - 1.5 * p + 0.5 * p * p,
-//     &[]
-// );
+linear_method!(
+    LaxWendroff,
+    p,
+    &[F::from_f64(0.5).mul(p).mul(p.add(F::one()))],
+    F::one().sub(p.mul(p)),
+    &[F::from_f64(0.5).mul(p).mul(p.sub(F::one()))]
+);
+linear_method!(
+    LaxWarming,
+    p,
+    &[
+        p.mul(F::from_f64(2.0).sub(p)),
+        F::from_f64(0.5).mul(p).mul(p.sub(F::one()))
+    ],
+    F::one()
+        .sub(F::from_f64(1.5).mul(p))
+        .add(F::from_f64(0.5).mul(p).mul(p)),
+    &[]
+);
