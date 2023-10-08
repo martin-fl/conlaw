@@ -23,7 +23,7 @@ fn main() -> io::Result<()> {
         LinearAdvection::advection_coefficient(),
     );
 
-    let mut solver = Driver::new(LinearAdvection, mesh, "bin/output.mat")?;
+    let mut solver = Driver::new(LinearAdvection, mesh, "bin/linear_advection.mat")?;
 
     solver.solve::<linear::LaxWarming<_>>(|x| 0.5 * (-100.0 * (x + 0.5).powi(2)).exp() + 0.25)
 }

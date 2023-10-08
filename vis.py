@@ -25,7 +25,10 @@ def render(file: str):
 		method_name = solution.read(method_name_len).decode()
 
 		print(f"""\
-rendering CSFF1 file `{file}` ({humanize.naturalsize(file_size, binary=True)}) to `{file}.gif`:
+rendering CSFF1 file:
+	file name: `{file}` 
+	file size: {humanize.naturalsize(file_size, binary=True)} 
+	output file name: `{file}.gif`
 	spatial grid: [{space_lower}, {space_upper}], Δx = {(space_upper-space_lower)/space_steps} ({space_steps} steps)
 	temporal grid: [{time_lower}, {time_upper}], Δt = {(time_upper-time_lower)/time_steps} ({time_steps} steps)
 	floating-point precision: {float_size*8} bits
@@ -41,7 +44,7 @@ rendering CSFF1 file `{file}` ({humanize.naturalsize(file_size, binary=True)}) t
 		u = read_next()
 	
 		fig, ax = plt.subplots()
-		wave_plot = ax.plot(u)[0]
+		wave_plot = ax.plot(xs, u)[0]
 		ax.set(ylim=[np.floor(np.min(u)), np.ceil(np.max(u))])
 
 		def update(frame):

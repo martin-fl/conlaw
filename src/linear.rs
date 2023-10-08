@@ -80,7 +80,7 @@ macro_rules! linear_method {
                     current,
                     None,
                     F::one(),
-                    faer_core::Parallelism::None,
+                    faer::get_global_parallelism(),
                 )
             }
 
