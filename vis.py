@@ -17,7 +17,8 @@ def render(file: str):
 		float_size = int.from_bytes(solution.read(1),byteorder=sys.byteorder)
 		dt = np.float32 if float_size == 4 else np.float64
 		space_steps = int.from_bytes(solution.read(4), byteorder=sys.byteorder)
-		system_dim = int.from_bytes(solution.read(4), byteorder=sys.byteorder)
+		sampling_period = int.from_bytes(solution.read(4), byteorder=sys.byteorder)
+		system_size = int.from_bytes(solution.read(4), byteorder=sys.byteorder)
 		time_steps = int.from_bytes(solution.read(4), byteorder=sys.byteorder)
 		[space_lower, space_upper] = np.frombuffer(solution.read(2*float_size), dt)
 		[time_lower, time_upper] = np.frombuffer(solution.read(2*float_size), dt)
@@ -31,6 +32,7 @@ rendering CSFF1 file:
 	output file name: `{file}.gif`
 	spatial grid: [{space_lower}, {space_upper}], Δx = {(space_upper-space_lower)/space_steps} ({space_steps} steps)
 	temporal grid: [{time_lower}, {time_upper}], Δt = {(time_upper-time_lower)/time_steps} ({time_steps} steps)
+	sampling period: {sampling_period}
 	floating-point precision: {float_size*8} bits
 	numerical method: {method_name}\
 """)
@@ -38,7 +40,7 @@ rendering CSFF1 file:
 		assert solution.read(4) == b"\xff\xff\xff\xff"
 		
 		def read_next():
-			return np.frombuffer(solution.read(float_size*(space_steps+1)), dt)
+			return np.frombuffer(solution.read(float_size*system_size*(space_steps+1)), dt)
 
 		xs = np.linspace(space_lower, space_upper, num=space_steps+1)
 		u = read_next()
@@ -50,10 +52,12 @@ rendering CSFF1 file:
 		def update(frame):
 			wave_plot.set_ydata(read_next())
 
+		num_frames = time_steps//sampling_period - 1
+
 		gif = FuncAnimation(
 			fig=fig, 
 			func=update, 
-			frames=time_steps-1, 
+			frames=num_frames, 
 		)
 
 		gif.save(filename=f"{file}.gif", writer="ffmpeg", fps=60)

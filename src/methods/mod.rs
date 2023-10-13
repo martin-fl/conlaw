@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use faer_core::{zipped, MatMut, MatRef};
 use reborrow::*;
 
@@ -7,15 +9,9 @@ use crate::{
     Ctx, SimpleFloat,
 };
 
+#[derive(Default)]
 pub struct UpwindLeft<F: SimpleFloat> {
     buf: Buffers<F, 2>,
-}
-impl<F: SimpleFloat> Default for UpwindLeft<F> {
-    fn default() -> Self {
-        Self {
-            buf: Buffers::default(),
-        }
-    }
 }
 
 impl<F: SimpleFloat> Method<F> for UpwindLeft<F> {
@@ -31,7 +27,7 @@ impl<F: SimpleFloat> Method<F> for UpwindLeft<F> {
         self.buf.resize(ctx.mesh.space.steps + 1);
     }
 
-    fn apply(&mut self, ctx: Ctx<F>, flux: impl FluxFunction<F>, u: MatRef<F>, v: MatMut<F>) {
+    fn apply(&mut self, ctx: Ctx<F>, flux: Rc<dyn FluxFunction<F>>, u: MatRef<F>, v: MatMut<F>) {
         // stores fluxes
         flux(ctx.left().as_ref(), self.buf.get_mut(0));
         flux(u.rb(), self.buf.get_mut(1));

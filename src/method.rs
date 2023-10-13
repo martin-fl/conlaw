@@ -1,29 +1,21 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, rc::Rc};
 
 use faer_core::{Mat, MatMut, MatRef};
 
 use crate::{problem::FluxFunction, Ctx, SimpleFloat};
 
-pub trait Method<F: SimpleFloat>: Default {
+pub trait Method<F: SimpleFloat> {
     fn left_ghost_cells(&self) -> usize;
     fn right_ghost_cells(&self) -> usize;
     fn init(&mut self, ctx: Ctx<F>);
-    fn apply(&mut self, ctx: Ctx<F>, flux: impl FluxFunction<F>, u: MatRef<F>, v: MatMut<F>);
+    fn apply(&mut self, ctx: Ctx<F>, flux: Rc<dyn FluxFunction<F>>, u: MatRef<F>, v: MatMut<F>);
     fn name(&self) -> &'static str;
 }
 
+#[derive(Default)]
 pub struct Buffers<F: SimpleFloat, const N: usize> {
     inner: Mat<F>,
     _marker: PhantomData<[(); N]>,
-}
-
-impl<F: SimpleFloat, const N: usize> std::default::Default for Buffers<F, N> {
-    fn default() -> Self {
-        Self {
-            inner: Mat::new(),
-            _marker: PhantomData,
-        }
-    }
 }
 
 impl<F: SimpleFloat, const N: usize> Buffers<F, N> {

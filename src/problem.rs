@@ -11,14 +11,14 @@ impl<F: SimpleFloat, T> FluxFunction<F> for T where T: Fn(MatRef<F>, MatMut<F>) 
 /// A hyperbolic PDE of the form `u_t + (f(u))_x = 0`
 #[derive(Clone)]
 pub struct ConservationLaw<F: SimpleFloat> {
-    pub(crate) m: usize,
+    pub(crate) system_size: usize,
     pub(crate) flux: Rc<dyn FluxFunction<F>>,
 }
 
 impl<F: SimpleFloat> ConservationLaw<F> {
     pub fn new(m: usize, flux: impl FluxFunction<F> + 'static) -> Self {
         Self {
-            m,
+            system_size: m,
             flux: Rc::new(flux),
         }
     }
@@ -27,7 +27,7 @@ impl<F: SimpleFloat> ConservationLaw<F> {
 impl<F: SimpleFloat> fmt::Debug for ConservationLaw<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConservationLaw")
-            .field("m", &self.m)
+            .field("system_size", &self.system_size)
             .field("flux", &"<function>")
             .finish()
     }
@@ -71,6 +71,10 @@ impl<F: SimpleFloat> Problem<F> {
             bc: Rc::new(bc),
             u0: Rc::new(u0),
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 

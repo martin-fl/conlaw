@@ -61,7 +61,7 @@ impl<F: SimpleFloat, M: Method<F>> Simulation<F, M> {
         self
     }
 
-    pub fn with_method<N: Method<F>>(self) -> Simulation<F, N> {
+    pub fn with_method<N: Method<F> + Default>(self) -> Simulation<F, N> {
         Simulation {
             problem: self.problem,
             mesh: self.mesh,

@@ -1,18 +1,111 @@
-use faer_core::Mat;
+use std::{io::Write, rc::Rc};
+
+use bytemuck::bytes_of;
+use faer_core::{Mat, MatRef};
 use reborrow::*;
+use thiserror::Error;
 
-use crate::{method::Method, sim::Simulation, Ctx, SimpleFloat};
+use crate::{mesh::Mesh, method::Method, sim::Simulation, Ctx, Problem, Resolution, SimpleFloat};
 
-pub struct Driver<F: SimpleFloat, M> {
-    pub(crate) sim: Simulation<F, M>,
+#[derive(Error, Debug)]
+pub enum SimError {
+    #[error("output error")]
+    Io(#[from] std::io::Error),
 }
 
-impl<F: SimpleFloat, M: Method<F>> Driver<F, M> {
-    pub fn new(sim: Simulation<F, M>) -> Self {
-        Self { sim }
+pub struct ObsCtx<'ctx, F: SimpleFloat> {
+    // Meta
+    problem: &'ctx Problem<F>,
+    mesh: &'ctx Mesh<F>,
+    method: &'ctx dyn Method<F>,
+    sampling_period: usize,
+
+    // Iteration info
+    iter: usize,
+    time: F,
+    solution: MatRef<'ctx, F>, // current solution *without* ghost cells
+}
+
+impl<'ctx, F: SimpleFloat> ObsCtx<'ctx, F> {
+    pub fn problem(&self) -> &Problem<F> {
+        self.problem
     }
 
-    pub fn run(&mut self) {
+    pub fn mesh(&self) -> &Mesh<F> {
+        self.mesh
+    }
+
+    pub fn method(&self) -> &dyn Method<F> {
+        self.method
+    }
+
+    pub fn iter(&self) -> usize {
+        self.iter
+    }
+
+    pub fn time(&self) -> F {
+        self.time
+    }
+
+    pub fn solution(&self) -> MatRef<'_, F> {
+        self.solution
+    }
+
+    pub fn sampling_period(&self) -> usize {
+        self.sampling_period
+    }
+}
+
+#[allow(unused_variables)]
+pub trait Observer<F: SimpleFloat> {
+    fn at_startup(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        Ok(())
+    }
+
+    fn at_each_iteration(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        Ok(())
+    }
+
+    fn at_cleanup(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        Ok(())
+    }
+}
+
+pub struct Driver<'d, F: SimpleFloat, M> {
+    pub(crate) sim: Simulation<F, M>,
+    pub(crate) observers: Vec<Box<dyn Observer<F> + 'd>>,
+    pub(crate) sampling_period: usize,
+}
+
+impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
+    pub fn new(sim: Simulation<F, M>) -> Self {
+        let sampling_period = 1 + sim.mesh.time.steps / 10;
+        Self {
+            sim,
+            observers: Vec::new(),
+            sampling_period,
+        }
+    }
+
+    pub fn with_sampling_period(mut self, sampling_period: Resolution<F>) -> Self
+    where
+        F: Into<f64>,
+    {
+        self.sampling_period = match sampling_period {
+            Resolution::Delta(sampling_period) => {
+                sampling_period.div(self.sim.mesh.time.delta).into().ceil() as usize
+            }
+            Resolution::Steps(sampling_period) => sampling_period,
+        };
+        self
+    }
+
+    pub fn with_observer(mut self, observer: impl Observer<F> + 'd) -> Self {
+        self.observers.push(Box::new(observer));
+        self
+    }
+
+    pub fn run(&mut self) -> Result<(), SimError> {
         let Simulation {
             problem,
             mesh,
@@ -24,6 +117,7 @@ impl<F: SimpleFloat, M: Method<F>> Driver<F, M> {
         let right_count = method.right_ghost_cells();
 
         let mut buffer = Mat::<F>::zeros(left_count + center_count + right_count, 2);
+
         let [mut u, mut v] = buffer.as_mut().split_at_col(1);
 
         // set initial condition
@@ -34,7 +128,7 @@ impl<F: SimpleFloat, M: Method<F>> Driver<F, M> {
             for (x, u) in mesh
                 .space
                 .iter()
-                .zip(center.rb_mut().into_row_chunks(problem.cl.m))
+                .zip(center.rb_mut().into_row_chunks(problem.cl.system_size))
             {
                 (problem.u0)(x, u)
             }
@@ -44,7 +138,7 @@ impl<F: SimpleFloat, M: Method<F>> Driver<F, M> {
                 .clone_from(center.rb());
 
             let ctx = Ctx {
-                m: problem.cl.m,
+                system_size: problem.cl.system_size,
                 left_ghost_cells: left_count,
                 right_ghost_cells: right_count,
                 mesh,
@@ -58,12 +152,24 @@ impl<F: SimpleFloat, M: Method<F>> Driver<F, M> {
 
             // use this occasion to instantiate the method's buffer
             method.init(ctx);
+
+            for o in self.observers.iter_mut() {
+                o.at_startup(ObsCtx {
+                    problem,
+                    mesh,
+                    method,
+                    sampling_period: self.sampling_period,
+                    iter: 0,
+                    time: mesh.time.lower,
+                    solution: center.as_ref(),
+                })?;
+            }
         }
 
         // propagate solution
         for (n, t) in mesh.time.iter().enumerate().skip(1) {
             let ctx = Ctx {
-                m: problem.cl.m,
+                system_size: problem.cl.system_size,
                 left_ghost_cells: left_count,
                 right_ghost_cells: right_count,
                 mesh,
@@ -78,12 +184,147 @@ impl<F: SimpleFloat, M: Method<F>> Driver<F, M> {
             let [mut v_center, v_right] = v_right.split_at_row(center_count);
 
             // apply numerical method to u into v
-            method.apply(ctx, &*problem.cl.flux, u_center.rb(), v_center.rb_mut());
+            method.apply(
+                ctx,
+                Rc::clone(&problem.cl.flux),
+                u_center.rb(),
+                v_center.rb_mut(),
+            );
             // apply boundary condition to v
             problem.bc.apply(ctx, v_left, v_center.rb(), v_right);
+
+            if n % self.sampling_period == 0 {
+                for o in self.observers.iter_mut() {
+                    o.at_each_iteration(ObsCtx {
+                        problem,
+                        mesh,
+                        method,
+                        sampling_period: self.sampling_period,
+                        iter: n,
+                        time: t,
+                        solution: v_center.as_ref(),
+                    })?;
+                }
+            }
 
             // exchange u and v
             std::mem::swap(&mut u, &mut v);
         }
+
+        for o in self.observers.iter_mut() {
+            o.at_cleanup(ObsCtx {
+                problem,
+                mesh,
+                method,
+                sampling_period: self.sampling_period,
+                iter: mesh.space.steps + 1,
+                time: mesh.space.upper.add(mesh.space.delta),
+                solution: u.rb().subrows(left_count, center_count),
+            })?;
+        }
+
+        Ok(())
+    }
+}
+
+pub struct Logger;
+
+impl<F: SimpleFloat + std::fmt::LowerExp> Observer<F> for Logger {
+    fn at_startup(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        tracing::event!(
+            tracing::Level::TRACE,
+            "start of simulation of problem `{}` (`{}` method, Δx={:e} ({} steps), Δt={:e} ({} steps))",
+            ctx.problem().name,
+            ctx.method().name(),
+            ctx.mesh().space.delta,
+            ctx.mesh().space.steps,
+            ctx.mesh().time.delta,
+            ctx.mesh().time.steps,
+        );
+        Ok(())
+    }
+
+    fn at_each_iteration(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        tracing::event!(
+            tracing::Level::TRACE,
+            "problem `{}`: step {}",
+            ctx.problem().name,
+            ctx.iter()
+        );
+        Ok(())
+    }
+
+    fn at_cleanup(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        tracing::event!(
+            tracing::Level::TRACE,
+            "finished simulation of problem `{}`",
+            ctx.problem().name
+        );
+        Ok(())
+    }
+}
+
+const CSFF1_HEADER: &[u8] = b"CSFF1";
+
+pub struct Csff1Writer<W> {
+    output: W,
+}
+
+impl<W: Write> Csff1Writer<W> {
+    pub fn new(output: W) -> Self {
+        Self { output }
+    }
+}
+
+impl<F: SimpleFloat, W: Write> Observer<F> for Csff1Writer<W> {
+    fn at_startup(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        let output = &mut self.output;
+        // magic bytes
+        output.write_all(CSFF1_HEADER)?;
+        // write float precision
+        output.write_all(bytes_of(&(std::mem::size_of::<F>() as u8)))?;
+        // write dimensions
+        output.write_all(bytes_of(&(ctx.mesh.space.steps as u32)))?;
+        output.write_all(bytes_of(&(ctx.sampling_period as u32)))?;
+        output.write_all(bytes_of(&(ctx.problem.cl.system_size as u32)))?;
+        output.write_all(bytes_of(&(ctx.mesh.time.steps as u32)))?;
+        // write bounds
+        output.write_all(bytes_of(&ctx.mesh.space.lower))?;
+        output.write_all(bytes_of(&ctx.mesh.space.upper))?;
+        output.write_all(bytes_of(&ctx.mesh.time.lower))?;
+        output.write_all(bytes_of(&ctx.mesh.time.upper))?;
+        // write method name
+        let name = ctx.method.name().as_bytes();
+        output.write_all(bytes_of(&(name.len() as u32)))?;
+        output.write_all(name)?;
+
+        // marker
+        output.write_all(&[0xFF, 0xFF, 0xFF, 0xFF])?;
+
+        // write initial condition
+        let u = ctx.solution;
+        // SAFETY: faer stores matrix contiguously in column major order
+        let u_slice =
+            unsafe { std::slice::from_raw_parts(F::from_group(u.rb().as_ptr()), u.nrows()) };
+
+        output
+            .write_all(bytemuck::cast_slice(u_slice))
+            .map_err(SimError::from)
+    }
+
+    fn at_each_iteration(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
+        let u = ctx.solution;
+        // SAFETY: faer stores matrix contiguously in column major order
+        let u_slice =
+            unsafe { std::slice::from_raw_parts(F::from_group(u.rb().as_ptr()), u.nrows()) };
+
+        self.output
+            .write_all(bytemuck::cast_slice(u_slice))
+            .map_err(SimError::from)
+    }
+
+    fn at_cleanup(&mut self, _ctx: ObsCtx<F>) -> Result<(), SimError> {
+        self.output.write_all(&[0xFF, 0xFF, 0xFF, 0xFF])?;
+        self.output.flush().map_err(SimError::from)
     }
 }
