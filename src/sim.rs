@@ -21,7 +21,7 @@ pub struct Simulation<F: SimpleFloat, M> {
     pub(crate) method: M,
 }
 
-impl<F: SimpleFloat> Simulation<F, methods::UpwindLeft<F>> {
+impl<F: SimpleFloat> Simulation<F, methods::MacCormack<F>> {
     pub fn new(problem: Problem<F>) -> Self {
         let mesh = Mesh::new(
             Grid::from_steps(problem.domain.time.0, problem.domain.time.1, 100),
@@ -31,7 +31,7 @@ impl<F: SimpleFloat> Simulation<F, methods::UpwindLeft<F>> {
         Self {
             problem,
             mesh,
-            method: methods::UpwindLeft::default(),
+            method: methods::MacCormack::default(),
         }
     }
 }

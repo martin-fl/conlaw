@@ -1,4 +1,4 @@
-use conlaw::{self, bc, methods, ConservationLaw, Domain, Driver, Problem, Resolution, Simulation};
+use conlaw::{self, bc, ConservationLaw, Domain, Driver, Problem, Resolution, Simulation};
 use std::{fs, io};
 
 fn main() {
@@ -21,8 +21,7 @@ fn main() {
 
     let sim = Simulation::new(problem)
         .with_time_resolution(Resolution::Delta(0.0005))
-        .with_space_resolution(Resolution::Delta(0.001))
-        .with_method::<methods::UpwindLeft<_>>();
+        .with_space_resolution(Resolution::Delta(0.001));
 
     let mut output = io::BufWriter::new(
         fs::File::create(format!("bin/{}.csff1", problem_name))
@@ -30,10 +29,9 @@ fn main() {
     );
 
     Driver::new(sim)
-        .with_observer(conlaw::Logger)
+        // .with_observer(conlaw::Logger)
         .with_observer(conlaw::Csff1Writer::new(&mut output))
-        .with_time_sampling(Resolution::Steps(20))
-        .with_space_sampling(Resolution::Steps(30))
+        .with_time_sampling(Resolution::Steps(10))
         .run()
         .expect("failed to run simulation");
 }
