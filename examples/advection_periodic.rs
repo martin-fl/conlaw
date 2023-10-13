@@ -12,7 +12,7 @@ fn main() {
         problem_name,
         ConservationLaw::new(1, |u, mut v| v.clone_from(u)),
         Domain {
-            time: (0., 1.),
+            time: (0., 2.),
             space: (-1., 1.),
         },
         bc::Periodic,
@@ -30,9 +30,10 @@ fn main() {
     );
 
     Driver::new(sim)
-        .with_sampling_period(Resolution::Delta(0.005))
         .with_observer(conlaw::Logger)
         .with_observer(conlaw::Csff1Writer::new(&mut output))
+        .with_time_sampling(Resolution::Steps(20))
+        .with_space_sampling(Resolution::Steps(30))
         .run()
         .expect("failed to run simulation");
 }

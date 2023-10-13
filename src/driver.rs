@@ -18,7 +18,8 @@ pub struct ObsCtx<'ctx, F: SimpleFloat> {
     problem: &'ctx Problem<F>,
     mesh: &'ctx Mesh<F>,
     method: &'ctx dyn Method<F>,
-    sampling_period: usize,
+    time_sampling: usize,
+    space_sampling: usize,
 
     // Iteration info
     iter: usize,
@@ -52,7 +53,7 @@ impl<'ctx, F: SimpleFloat> ObsCtx<'ctx, F> {
     }
 
     pub fn sampling_period(&self) -> usize {
-        self.sampling_period
+        self.time_sampling
     }
 }
 
@@ -74,26 +75,41 @@ pub trait Observer<F: SimpleFloat> {
 pub struct Driver<'d, F: SimpleFloat, M> {
     pub(crate) sim: Simulation<F, M>,
     pub(crate) observers: Vec<Box<dyn Observer<F> + 'd>>,
-    pub(crate) sampling_period: usize,
+    pub(crate) time_sampling: usize,
+    pub(crate) space_sampling: usize,
 }
 
 impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
     pub fn new(sim: Simulation<F, M>) -> Self {
-        let sampling_period = 1 + sim.mesh.time.steps / 10;
+        let time_sampling = 1 + sim.mesh.time.steps / 10;
         Self {
             sim,
             observers: Vec::new(),
-            sampling_period,
+            time_sampling,
+            space_sampling: 1,
         }
     }
 
-    pub fn with_sampling_period(mut self, sampling_period: Resolution<F>) -> Self
+    pub fn with_time_sampling(mut self, sampling_period: Resolution<F>) -> Self
     where
         F: Into<f64>,
     {
-        self.sampling_period = match sampling_period {
+        self.time_sampling = match sampling_period {
             Resolution::Delta(sampling_period) => {
                 sampling_period.div(self.sim.mesh.time.delta).into().ceil() as usize
+            }
+            Resolution::Steps(sampling_period) => sampling_period,
+        };
+        self
+    }
+
+    pub fn with_space_sampling(mut self, sampling_period: Resolution<F>) -> Self
+    where
+        F: Into<f64>,
+    {
+        self.space_sampling = match sampling_period {
+            Resolution::Delta(sampling_period) => {
+                sampling_period.div(self.sim.mesh.space.delta).into().ceil() as usize
             }
             Resolution::Steps(sampling_period) => sampling_period,
         };
@@ -158,7 +174,8 @@ impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
                     problem,
                     mesh,
                     method,
-                    sampling_period: self.sampling_period,
+                    time_sampling: self.time_sampling,
+                    space_sampling: self.space_sampling,
                     iter: 0,
                     time: mesh.time.lower,
                     solution: center.as_ref(),
@@ -193,13 +210,14 @@ impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
             // apply boundary condition to v
             problem.bc.apply(ctx, v_left, v_center.rb(), v_right);
 
-            if n % self.sampling_period == 0 {
+            if n % self.time_sampling == 0 {
                 for o in self.observers.iter_mut() {
                     o.at_each_iteration(ObsCtx {
                         problem,
                         mesh,
                         method,
-                        sampling_period: self.sampling_period,
+                        time_sampling: self.time_sampling,
+                        space_sampling: self.space_sampling,
                         iter: n,
                         time: t,
                         solution: v_center.as_ref(),
@@ -216,7 +234,8 @@ impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
                 problem,
                 mesh,
                 method,
-                sampling_period: self.sampling_period,
+                time_sampling: self.time_sampling,
+                space_sampling: self.space_sampling,
                 iter: mesh.space.steps + 1,
                 time: mesh.space.upper.add(mesh.space.delta),
                 solution: u.rb().subrows(left_count, center_count),
@@ -285,7 +304,8 @@ impl<F: SimpleFloat, W: Write> Observer<F> for Csff1Writer<W> {
         output.write_all(bytes_of(&(std::mem::size_of::<F>() as u8)))?;
         // write dimensions
         output.write_all(bytes_of(&(ctx.mesh.space.steps as u32)))?;
-        output.write_all(bytes_of(&(ctx.sampling_period as u32)))?;
+        output.write_all(bytes_of(&(ctx.time_sampling as u32)))?;
+        output.write_all(bytes_of(&(ctx.space_sampling as u32)))?;
         output.write_all(bytes_of(&(ctx.problem.cl.system_size as u32)))?;
         output.write_all(bytes_of(&(ctx.mesh.time.steps as u32)))?;
         // write bounds
@@ -302,25 +322,34 @@ impl<F: SimpleFloat, W: Write> Observer<F> for Csff1Writer<W> {
         output.write_all(&[0xFF, 0xFF, 0xFF, 0xFF])?;
 
         // write initial condition
-        let u = ctx.solution;
-        // SAFETY: faer stores matrix contiguously in column major order
-        let u_slice =
-            unsafe { std::slice::from_raw_parts(F::from_group(u.rb().as_ptr()), u.nrows()) };
-
-        output
-            .write_all(bytemuck::cast_slice(u_slice))
-            .map_err(SimError::from)
+        self.at_each_iteration(ctx)
     }
 
     fn at_each_iteration(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
         let u = ctx.solution;
-        // SAFETY: faer stores matrix contiguously in column major order
-        let u_slice =
-            unsafe { std::slice::from_raw_parts(F::from_group(u.rb().as_ptr()), u.nrows()) };
+        if ctx.space_sampling == 1 {
+            // SAFETY: faer stores matrix contiguously in column major order
+            let u_slice =
+                unsafe { std::slice::from_raw_parts(F::from_group(u.rb().as_ptr()), u.nrows()) };
 
-        self.output
-            .write_all(bytemuck::cast_slice(u_slice))
-            .map_err(SimError::from)
+            self.output
+                .write_all(bytemuck::cast_slice(u_slice))
+                .map_err(SimError::from)
+        } else {
+            for chunk in u
+                .into_row_chunks(ctx.problem.cl.system_size)
+                .step_by(ctx.space_sampling)
+            {
+                // SAFETY: faer stores matrix contiguously in column major order
+                let chunk_slice = unsafe {
+                    std::slice::from_raw_parts(F::from_group(chunk.rb().as_ptr()), chunk.nrows())
+                };
+                self.output
+                    .write_all(bytemuck::cast_slice(chunk_slice))
+                    .map_err(SimError::from)?
+            }
+            Ok(())
+        }
     }
 
     fn at_cleanup(&mut self, _ctx: ObsCtx<F>) -> Result<(), SimError> {
