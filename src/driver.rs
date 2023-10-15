@@ -251,7 +251,7 @@ pub struct Logger;
 impl<F: SimpleFloat + std::fmt::LowerExp> Observer<F> for Logger {
     fn at_startup(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
         tracing::event!(
-            tracing::Level::TRACE,
+            tracing::Level::INFO,
             "start of simulation of problem `{}` (`{}` method, Δx={:e} ({} steps), Δt={:e} ({} steps))",
             ctx.problem().name,
             ctx.method().name(),
@@ -275,7 +275,7 @@ impl<F: SimpleFloat + std::fmt::LowerExp> Observer<F> for Logger {
 
     fn at_cleanup(&mut self, ctx: ObsCtx<F>) -> Result<(), SimError> {
         tracing::event!(
-            tracing::Level::TRACE,
+            tracing::Level::INFO,
             "finished simulation of problem `{}`",
             ctx.problem().name
         );

@@ -1,9 +1,9 @@
-use conlaw::{self, bc, ConservationLaw, Domain, Driver, Problem, Resolution, Simulation};
+use conlaw::{self, bc, methods, ConservationLaw, Domain, Driver, Problem, Resolution, Simulation};
 use std::{fs, io};
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(tracing::Level::DEBUG)
         .init();
 
     let problem_name = "advection_periodic";
@@ -20,6 +20,7 @@ fn main() {
     );
 
     let sim = Simulation::new(problem)
+        .with_method::<methods::UpwindLeft<_>>()
         .with_time_resolution(Resolution::Delta(0.0005))
         .with_space_resolution(Resolution::Delta(0.001));
 
@@ -29,9 +30,10 @@ fn main() {
     );
 
     Driver::new(sim)
-        // .with_observer(conlaw::Logger)
+        .with_observer(conlaw::Logger)
         .with_observer(conlaw::Csff1Writer::new(&mut output))
         .with_time_sampling(Resolution::Steps(10))
+        .with_space_sampling(Resolution::Steps(10))
         .run()
         .expect("failed to run simulation");
 }
