@@ -13,9 +13,9 @@ pub enum SimError {
     Io(#[from] std::io::Error),
 }
 
-pub struct ObsCtx<'ctx, F: SimpleFloat> {
+pub struct ObsCtx<'pb, 'ctx, F: SimpleFloat> {
     // Meta
-    problem: &'ctx Problem<F>,
+    problem: &'ctx Problem<'pb, F>,
     mesh: &'ctx Mesh<F>,
     method: &'ctx dyn Method<F>,
     time_sampling: usize,
@@ -27,8 +27,8 @@ pub struct ObsCtx<'ctx, F: SimpleFloat> {
     solution: MatRef<'ctx, F>, // current solution *without* ghost cells
 }
 
-impl<'ctx, F: SimpleFloat> ObsCtx<'ctx, F> {
-    pub fn problem(&self) -> &Problem<F> {
+impl<'pb, 'ctx, F: SimpleFloat> ObsCtx<'pb, 'ctx, F> {
+    pub fn problem(&self) -> &Problem<'pb, F> {
         self.problem
     }
 
@@ -72,15 +72,15 @@ pub trait Observer<F: SimpleFloat> {
     }
 }
 
-pub struct Driver<'d, F: SimpleFloat, M> {
-    pub(crate) sim: Simulation<F, M>,
+pub struct Driver<'pb, 'd, F: SimpleFloat, M> {
+    pub(crate) sim: Simulation<'pb, F, M>,
     pub(crate) observers: Vec<Box<dyn Observer<F> + 'd>>,
     pub(crate) time_sampling: usize,
     pub(crate) space_sampling: usize,
 }
 
-impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
-    pub fn new(sim: Simulation<F, M>) -> Self {
+impl<'pb, 'd, F: SimpleFloat, M: Method<F>> Driver<'pb, 'd, F, M> {
+    pub fn new(sim: Simulation<'pb, F, M>) -> Self {
         let time_sampling = 1 + sim.mesh.time.steps / 10;
         Self {
             sim,
@@ -144,7 +144,7 @@ impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
             for (x, u) in mesh
                 .space
                 .iter()
-                .zip(center.rb_mut().into_row_chunks(problem.cl.system_size))
+                .zip(center.rb_mut().into_row_chunks(problem.cl.system_size()))
             {
                 (problem.u0)(x, u)
             }
@@ -154,7 +154,7 @@ impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
                 .clone_from(center.rb());
 
             let ctx = Ctx {
-                system_size: problem.cl.system_size,
+                system_size: problem.cl.system_size(),
                 left_ghost_cells: left_count,
                 right_ghost_cells: right_count,
                 mesh,
@@ -186,7 +186,7 @@ impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
         // propagate solution
         for (n, t) in mesh.time.iter().enumerate().skip(1) {
             let ctx = Ctx {
-                system_size: problem.cl.system_size,
+                system_size: problem.cl.system_size(),
                 left_ghost_cells: left_count,
                 right_ghost_cells: right_count,
                 mesh,
@@ -203,7 +203,7 @@ impl<'d, F: SimpleFloat, M: Method<F>> Driver<'d, F, M> {
             // apply numerical method to u into v
             method.apply(
                 ctx,
-                Rc::clone(&problem.cl.flux),
+                Rc::clone(&problem.cl),
                 u_center.rb(),
                 v_center.rb_mut(),
             );
@@ -306,7 +306,7 @@ impl<F: SimpleFloat, W: Write> Observer<F> for Csff1Writer<W> {
         output.write_all(bytes_of(&(ctx.mesh.space.steps as u32)))?;
         output.write_all(bytes_of(&(ctx.time_sampling as u32)))?;
         output.write_all(bytes_of(&(ctx.space_sampling as u32)))?;
-        output.write_all(bytes_of(&(ctx.problem.cl.system_size as u32)))?;
+        output.write_all(bytes_of(&(ctx.problem.cl.system_size() as u32)))?;
         output.write_all(bytes_of(&(ctx.mesh.time.steps as u32)))?;
         // write bounds
         output.write_all(bytes_of(&ctx.mesh.space.lower))?;
@@ -337,7 +337,7 @@ impl<F: SimpleFloat, W: Write> Observer<F> for Csff1Writer<W> {
                 .map_err(SimError::from)
         } else {
             for chunk in u
-                .into_row_chunks(ctx.problem.cl.system_size)
+                .into_row_chunks(ctx.problem.cl.system_size())
                 .step_by(ctx.space_sampling)
             {
                 // SAFETY: faer stores matrix contiguously in column major order

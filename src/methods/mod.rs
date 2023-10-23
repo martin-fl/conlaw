@@ -5,24 +5,9 @@ use reborrow::*;
 
 use crate::{
     method::{Buffers, Method},
-    problem::FluxFunction,
+    problem::ConservationLaw,
     Ctx, SimpleFloat,
 };
-
-fn apply_flux_in_chunks<F: SimpleFloat>(
-    u: MatRef<F>,
-    fu: MatMut<F>,
-    chunk_size: usize,
-    flux: &Rc<dyn FluxFunction<F>>,
-) {
-    for (u, fu) in u
-        .rb()
-        .into_row_chunks(chunk_size)
-        .zip(fu.into_row_chunks(chunk_size))
-    {
-        flux(u, fu)
-    }
-}
 
 #[derive(Default)]
 pub struct UpwindLeft<F: SimpleFloat> {
@@ -42,10 +27,16 @@ impl<F: SimpleFloat> Method<F> for UpwindLeft<F> {
         self.buf.resize(ctx.mesh.space.steps + 1);
     }
 
-    fn apply(&mut self, ctx: Ctx<F>, flux: Rc<dyn FluxFunction<F>>, u: MatRef<F>, v: MatMut<F>) {
+    fn apply<'m, 'pb>(
+        &'m mut self,
+        ctx: Ctx<F>,
+        flux: Rc<dyn ConservationLaw<F> + 'pb>,
+        u: MatRef<F>,
+        v: MatMut<F>,
+    ) {
         // stores fluxes
-        apply_flux_in_chunks(ctx.left(), self.buf.get_mut(0), ctx.system_size, &flux);
-        apply_flux_in_chunks(u.rb(), self.buf.get_mut(1), ctx.system_size, &flux);
+        flux.bulk_flux_function(ctx.left(), self.buf.get_mut(0));
+        flux.bulk_flux_function(u.rb(), self.buf.get_mut(1));
 
         // component-wise schema
         let r = ctx.mesh.time.delta.div(ctx.mesh.space.delta);
@@ -79,10 +70,16 @@ impl<F: SimpleFloat> Method<F> for UpwindRight<F> {
         self.buf.resize(ctx.mesh.space.steps + 1);
     }
 
-    fn apply(&mut self, ctx: Ctx<F>, flux: Rc<dyn FluxFunction<F>>, u: MatRef<F>, v: MatMut<F>) {
+    fn apply<'m, 'pb>(
+        &'m mut self,
+        ctx: Ctx<F>,
+        flux: Rc<dyn ConservationLaw<F> + 'pb>,
+        u: MatRef<F>,
+        v: MatMut<F>,
+    ) {
         // stores fluxes
-        apply_flux_in_chunks(u.rb(), self.buf.get_mut(0), ctx.system_size, &flux);
-        apply_flux_in_chunks(ctx.right(), self.buf.get_mut(1), ctx.system_size, &flux);
+        flux.bulk_flux_function(u.rb(), self.buf.get_mut(0));
+        flux.bulk_flux_function(ctx.right(), self.buf.get_mut(1));
 
         // component-wise schema
         let r = ctx.mesh.time.delta.div(ctx.mesh.space.delta);
@@ -116,10 +113,16 @@ impl<F: SimpleFloat> Method<F> for LaxFriedrichs<F> {
         self.buf.resize(ctx.mesh.space.steps + 1);
     }
 
-    fn apply(&mut self, ctx: Ctx<F>, flux: Rc<dyn FluxFunction<F>>, _u: MatRef<F>, v: MatMut<F>) {
+    fn apply<'m, 'pb>(
+        &'m mut self,
+        ctx: Ctx<F>,
+        flux: Rc<dyn ConservationLaw<F> + 'pb>,
+        _u: MatRef<F>,
+        v: MatMut<F>,
+    ) {
         // stores fluxes
-        apply_flux_in_chunks(ctx.left(), self.buf.get_mut(0), ctx.system_size, &flux);
-        apply_flux_in_chunks(ctx.right(), self.buf.get_mut(1), ctx.system_size, &flux);
+        flux.bulk_flux_function(ctx.left(), self.buf.get_mut(0));
+        flux.bulk_flux_function(ctx.right(), self.buf.get_mut(1));
 
         // component-wise schema
         let r = ctx.mesh.time.delta.div(ctx.mesh.space.delta);
@@ -158,11 +161,17 @@ impl<F: SimpleFloat> Method<F> for MacCormack<F> {
         self.buf_b.resize(ctx.mesh.space.steps + 1);
     }
 
-    fn apply(&mut self, ctx: Ctx<F>, flux: Rc<dyn FluxFunction<F>>, u: MatRef<F>, v: MatMut<F>) {
+    fn apply<'m, 'pb>(
+        &'m mut self,
+        ctx: Ctx<F>,
+        flux: Rc<dyn ConservationLaw<F> + 'pb>,
+        u: MatRef<F>,
+        v: MatMut<F>,
+    ) {
         // stores fluxes
-        apply_flux_in_chunks(ctx.left(), self.buf_a.get_mut(0), ctx.system_size, &flux);
-        apply_flux_in_chunks(u.rb(), self.buf_a.get_mut(1), ctx.system_size, &flux);
-        apply_flux_in_chunks(ctx.right(), self.buf_a.get_mut(2), ctx.system_size, &flux);
+        flux.bulk_flux_function(ctx.left(), self.buf_a.get_mut(0));
+        flux.bulk_flux_function(u.rb(), self.buf_a.get_mut(1));
+        flux.bulk_flux_function(ctx.right(), self.buf_a.get_mut(2));
 
         // component-wise schema
         let r = ctx.mesh.time.delta.div(ctx.mesh.space.delta);
@@ -184,19 +193,8 @@ impl<F: SimpleFloat> Method<F> for MacCormack<F> {
         )
         .for_each(|mut v, um, fum, fu| v.write(forward(um.read(), fum.read(), fu.read())));
 
-        apply_flux_in_chunks(
-            self.buf_b.get(0),
-            self.buf_a.get_mut(0),
-            ctx.system_size,
-            &flux,
-        );
-
-        apply_flux_in_chunks(
-            self.buf_b.get(1),
-            self.buf_a.get_mut(1),
-            ctx.system_size,
-            &flux,
-        );
+        flux.bulk_flux_function(self.buf_b.get(0), self.buf_a.get_mut(0));
+        flux.bulk_flux_function(self.buf_b.get(1), self.buf_a.get_mut(1));
 
         let backward = |u: F, us: F, fusm: F, fus: F| -> F {
             (u.add(us).sub(r.mul(fus.sub(fusm)))).mul(F::from_f64(0.5))
@@ -219,26 +217,3 @@ impl<F: SimpleFloat> Method<F> for MacCormack<F> {
         "MacCormarck"
     }
 }
-
-// let f = P::flux;
-//        let v = current.submatrix(1, 0, self.x_steps - 1, 1);
-//        let vp = current.submatrix(2, 0, self.x_steps - 1, 1);
-//        let w = self.w.as_mut().submatrix(1, 0, self.x_steps - 1, 1);
-
-//        // let schema_1 = |v, vp| v - self.ratio * (f(vp) - f(v));
-//        // let schema_2 = |v, wm, w| 0.5 * (v + w) - 0.5 * self.ratio * (f(w) - f(wm));
-//        let schema_1 = |v: F, vp: F| v.sub(self.ratio.mul(vp.sub(f(v))));
-//        let schema_2 = |v: F, wm: F, w: F| {
-//            v.add(w)
-//                .sub(self.ratio.mul(f(w).sub(f(wm))))
-//                .mul(F::from_f64(0.5))
-//        };
-
-//        zipped!(w, v, vp).for_each(|mut w, v, vp| w.write(schema_1(v.read(), vp.read())));
-
-//        let w = self.w.as_ref().submatrix(1, 0, self.x_steps - 1, 1);
-//        let wm = self.w.as_ref().submatrix(0, 0, self.x_steps - 1, 1);
-
-//        // compute solution at time t_{n+1}
-//        zipped!(out.rb_mut().submatrix(1, 0, self.x_steps - 1, 1), v, wm, w)
-//            .for_each(|mut out, v, wm, w| out.write(schema_2(v.read(), wm.read(), w.read())));

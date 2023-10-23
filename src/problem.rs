@@ -1,35 +1,89 @@
-use std::fmt;
+use core::fmt;
 use std::rc::Rc;
 
 use faer_core::{MatMut, MatRef};
+use reborrow::*;
 
 use crate::{Ctx, SimpleFloat};
 
-pub trait FluxFunction<F: SimpleFloat>: Fn(MatRef<F>, MatMut<F>) {}
-impl<F: SimpleFloat, T> FluxFunction<F> for T where T: Fn(MatRef<F>, MatMut<F>) {}
-
 /// A hyperbolic PDE of the form `u_t + (f(u))_x = 0`
-#[derive(Clone)]
-pub struct ConservationLaw<F: SimpleFloat> {
-    pub(crate) system_size: usize,
-    pub(crate) flux: Rc<dyn FluxFunction<F>>,
-}
+pub trait ConservationLaw<F: SimpleFloat> {
+    fn system_size(&self) -> usize;
+    fn flux_function(&self, u: MatRef<F>, v: MatMut<F>);
 
-impl<F: SimpleFloat> ConservationLaw<F> {
-    pub fn new(m: usize, flux: impl FluxFunction<F> + 'static) -> Self {
-        Self {
-            system_size: m,
-            flux: Rc::new(flux),
+    fn bulk_flux_function(&self, u: MatRef<F>, v: MatMut<F>) {
+        for (u, v) in u
+            .rb()
+            .into_row_chunks(self.system_size())
+            .zip(v.into_row_chunks(self.system_size()))
+        {
+            self.flux_function(u, v)
         }
     }
 }
 
-impl<F: SimpleFloat> fmt::Debug for ConservationLaw<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ConservationLaw")
-            .field("system_size", &self.system_size)
-            .field("flux", &"<function>")
-            .finish()
+pub mod cl {
+    use super::*;
+    use faer_core::zipped;
+    use std::marker::PhantomData;
+
+    pub struct General<F, G> {
+        system_size: usize,
+        flux_function: G,
+        _marker: PhantomData<F>,
+    }
+
+    impl<F: SimpleFloat, G: Fn(MatRef<F>, MatMut<F>)> General<F, G> {
+        pub fn new(system_size: usize, flux_function: G) -> Self {
+            Self {
+                system_size,
+                flux_function,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<F: SimpleFloat, G: Fn(MatRef<F>, MatMut<F>)> ConservationLaw<F> for General<F, G> {
+        #[inline]
+        fn system_size(&self) -> usize {
+            self.system_size
+        }
+
+        #[inline]
+        fn flux_function(&self, u: MatRef<F>, v: MatMut<F>) {
+            (self.flux_function)(u, v)
+        }
+    }
+
+    pub struct Scalar<F, G> {
+        flux_function: G,
+        _marker: PhantomData<F>,
+    }
+
+    impl<F: SimpleFloat, G: Fn(F) -> F> Scalar<F, G> {
+        pub fn new(flux_function: G) -> Self {
+            Self {
+                flux_function,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<F: SimpleFloat, G: Fn(F) -> F> ConservationLaw<F> for Scalar<F, G> {
+        #[inline]
+        fn system_size(&self) -> usize {
+            1
+        }
+
+        #[inline]
+        fn flux_function(&self, u: MatRef<F>, v: MatMut<F>) {
+            zipped!(v, u).for_each(|mut v, u| v.write((self.flux_function)(u.read())));
+        }
+
+        #[inline]
+        fn bulk_flux_function(&self, u: MatRef<F>, v: MatMut<F>) {
+            zipped!(v, u).for_each(|mut v, u| v.write((self.flux_function)(u.read())));
+        }
     }
 }
 
@@ -48,25 +102,25 @@ pub trait InitialCondition<F: SimpleFloat>: Fn(F, MatMut<F>) {}
 impl<F: SimpleFloat, T> InitialCondition<F> for T where T: Fn(F, MatMut<F>) {}
 
 #[derive(Clone)]
-pub struct Problem<F: SimpleFloat> {
+pub struct Problem<'pb, F: SimpleFloat> {
     pub(crate) name: String,
-    pub(crate) cl: ConservationLaw<F>,
+    pub(crate) cl: Rc<dyn ConservationLaw<F> + 'pb>,
     pub(crate) domain: Domain<F>,
-    pub(crate) bc: Rc<dyn BoundaryCondition<F>>,
-    pub(crate) u0: Rc<dyn InitialCondition<F>>,
+    pub(crate) bc: Rc<dyn BoundaryCondition<F> + 'pb>,
+    pub(crate) u0: Rc<dyn InitialCondition<F> + 'pb>,
 }
 
-impl<F: SimpleFloat> Problem<F> {
+impl<'pb, F: SimpleFloat> Problem<'pb, F> {
     pub fn new(
         name: impl AsRef<str>,
-        cl: ConservationLaw<F>,
+        cl: impl ConservationLaw<F> + 'pb,
         domain: Domain<F>,
-        bc: impl BoundaryCondition<F> + 'static,
-        u0: impl InitialCondition<F> + 'static,
+        bc: impl BoundaryCondition<F> + 'pb,
+        u0: impl InitialCondition<F> + 'pb,
     ) -> Self {
         Self {
             name: name.as_ref().to_string(),
-            cl,
+            cl: Rc::new(cl),
             domain,
             bc: Rc::new(bc),
             u0: Rc::new(u0),
@@ -78,11 +132,11 @@ impl<F: SimpleFloat> Problem<F> {
     }
 }
 
-impl<F: SimpleFloat> fmt::Debug for Problem<F> {
+impl<F: SimpleFloat> fmt::Debug for Problem<'_, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Problem")
             .field("name", &self.name)
-            .field("cl", &self.cl)
+            // .field("cl", &self.cl)
             .field("domain", &self.domain)
             .field("bc", &"<function>")
             .field("u0", &"<function>")

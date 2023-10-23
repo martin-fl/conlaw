@@ -2,13 +2,19 @@ use std::{marker::PhantomData, rc::Rc};
 
 use faer_core::{Mat, MatMut, MatRef};
 
-use crate::{problem::FluxFunction, Ctx, SimpleFloat};
+use crate::{ConservationLaw, Ctx, SimpleFloat};
 
 pub trait Method<F: SimpleFloat> {
     fn left_ghost_cells(&self) -> usize;
     fn right_ghost_cells(&self) -> usize;
     fn init(&mut self, ctx: Ctx<F>);
-    fn apply(&mut self, ctx: Ctx<F>, flux: Rc<dyn FluxFunction<F>>, u: MatRef<F>, v: MatMut<F>);
+    fn apply<'m, 'pb>(
+        &'m mut self,
+        ctx: Ctx<F>,
+        flux: Rc<dyn ConservationLaw<F> + 'pb>,
+        u: MatRef<F>,
+        v: MatMut<F>,
+    );
     fn name(&self) -> &'static str;
 }
 

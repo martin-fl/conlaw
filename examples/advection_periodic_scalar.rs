@@ -10,7 +10,7 @@ fn main() {
 
     let problem = Problem::<f32>::new(
         problem_name,
-        cl::General::new(1, |u, mut v| v.clone_from(u)),
+        cl::Scalar::new(|u| u),
         Domain {
             time: (0., 2.),
             space: (-1., 1.),

@@ -15,14 +15,14 @@ pub enum Resolution<F> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Simulation<F: SimpleFloat, M> {
-    pub(crate) problem: Problem<F>,
+pub struct Simulation<'pb, F: SimpleFloat, M> {
+    pub(crate) problem: Problem<'pb, F>,
     pub(crate) mesh: Mesh<F>,
     pub(crate) method: M,
 }
 
-impl<F: SimpleFloat> Simulation<F, methods::MacCormack<F>> {
-    pub fn new(problem: Problem<F>) -> Self {
+impl<'pb, F: SimpleFloat> Simulation<'pb, F, methods::MacCormack<F>> {
+    pub fn new(problem: Problem<'pb, F>) -> Self {
         let mesh = Mesh::new(
             Grid::from_steps(problem.domain.time.0, problem.domain.time.1, 100),
             Grid::from_steps(problem.domain.space.0, problem.domain.space.1, 100),
@@ -36,7 +36,7 @@ impl<F: SimpleFloat> Simulation<F, methods::MacCormack<F>> {
     }
 }
 
-impl<F: SimpleFloat, M: Method<F>> Simulation<F, M> {
+impl<'pb, F: SimpleFloat, M: Method<F>> Simulation<'pb, F, M> {
     pub fn with_time_resolution(mut self, r: Resolution<F>) -> Self
     where
         F: Into<f64>,
@@ -61,7 +61,7 @@ impl<F: SimpleFloat, M: Method<F>> Simulation<F, M> {
         self
     }
 
-    pub fn with_method<N: Method<F> + Default>(self) -> Simulation<F, N> {
+    pub fn with_method<N: Method<F> + Default>(self) -> Simulation<'pb, F, N> {
         Simulation {
             problem: self.problem,
             mesh: self.mesh,
@@ -70,7 +70,7 @@ impl<F: SimpleFloat, M: Method<F>> Simulation<F, M> {
     }
 }
 
-impl<F: SimpleFloat + fmt::LowerExp, M: Method<F>> fmt::Display for Simulation<F, M> {
+impl<F: SimpleFloat + fmt::LowerExp, M: Method<F>> fmt::Display for Simulation<'_, F, M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
