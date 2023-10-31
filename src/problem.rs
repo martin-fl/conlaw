@@ -136,10 +136,10 @@ impl<F: SimpleFloat> fmt::Debug for Problem<'_, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Problem")
             .field("name", &self.name)
-            // .field("cl", &self.cl)
+            .field("cl", &"<dyn ConservationLaw<_>>")
             .field("domain", &self.domain)
-            .field("bc", &"<function>")
-            .field("u0", &"<function>")
+            .field("bc", &"<dyn BoundaryCondition<_>>")
+            .field("u0", &"<dyn InitialCondition<_>>")
             .finish()
     }
 }
